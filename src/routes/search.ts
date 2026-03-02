@@ -27,7 +27,8 @@ const TAVILY_PASSTHROUGH_KEYS = [
 export async function handleSearch(
     request: Request,
     env: Env,
-    token: string
+    token: string,
+    ctx: ExecutionContext
 ): Promise<Response> {
 
     // ── Step 1: 哈希原始 token，再查 KV 中的信用额度 ─────────
@@ -98,12 +99,29 @@ export async function handleSearch(
     // ── Step 7: 透传 Tavily 结果，附加 UniSkill 元数据 ────────
     const tavilyData = (await tavilyRes.json()) as Record<string, unknown>;
     const COST = 1;
+    const newBalance = credits - COST;
+
+    // 🔥 CRITICAL: Use ctx.waitUntil to avoid delaying the user's response
+    // 关键：使用 ctx.waitUntil 确保同步逻辑在后台运行，不影响用户获取 AI 结果的速度
+    ctx.waitUntil(
+        fetch("https://uniskill-web.vercel.app/api/webhook/sync-credits", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${env.ADMIN_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                hash: tokenHash,
+                newBalance: newBalance
+            })
+        })
+    );
 
     return new Response(
         JSON.stringify({
             ...tavilyData,
             // _uniskill 元数据块：由 buildUniskillMeta 统一构建，便于全局修改
-            _uniskill: buildUniskillMeta(COST, credits - COST, request),
+            _uniskill: buildUniskillMeta(COST, newBalance, request),
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
     );

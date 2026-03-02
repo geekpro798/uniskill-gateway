@@ -20,12 +20,12 @@ export interface Env {
 
 // ── 路由表：路径 → 处理函数 ──────────────────────────────────
 // 扩展新技能路由时，只需在此处添加条目（路径使用 /v1/ 前缀做版本管理）
-const ROUTES: Record<string, (req: Request, env: Env, token: string) => Promise<Response>> = {
+const ROUTES: Record<string, (req: Request, env: Env, token: string, ctx: ExecutionContext) => Promise<Response>> = {
   "/v1/search": handleSearch,
 };
 
 // ── 业务请求处理器 ─────────────────────────────────────────────
-async function handleUserRequest(request: Request, env: Env): Promise<Response> {
+async function handleUserRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const { method, url } = request;
   const { pathname } = new URL(url);
 
@@ -53,12 +53,12 @@ async function handleUserRequest(request: Request, env: Env): Promise<Response> 
   }
 
   // ── 4. 执行对应路由处理器 ────────────────────────────────
-  return handler(request, env, token);
+  return handler(request, env, token, ctx);
 }
 
 // ── 主 Fetch 处理器 ───────────────────────────────────────────
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // 0. 健康检查：无需鉴权，供 uptime 监控使用
@@ -86,6 +86,6 @@ export default {
 
     // 2. User Area: For API consumption
     // 业务区域：供 API 实际使用
-    return handleUserRequest(request, env);
+    return handleUserRequest(request, env, ctx);
   },
 };
