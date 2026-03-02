@@ -26,22 +26,32 @@ export async function handleProvision(request: Request, env: Env): Promise<Respo
 
     // ── Step 2: 解析可选的请求体参数 ─────────────────────────
     let initialCredits = DEFAULT_INITIAL_CREDITS;
+    let providedHash: string | undefined = undefined;
+
     try {
         const body = await request.json() as Record<string, unknown>;
         if (typeof body.credits === "number" && body.credits > 0) {
             initialCredits = Math.floor(body.credits);
         }
+        if (typeof body.hash === "string" && body.hash.length > 0) {
+            providedHash = body.hash;
+        }
     } catch {
         // 无 body 或解析失败均使用默认值
     }
 
-    // ── Step 3: 生成原始 Token（用户唯一一次看到完整 Key）────
-    // crypto.randomUUID() 在 Cloudflare Workers 运行时中原生支持
-    const rawToken = `us-${crypto.randomUUID()}`;
+    // ── Step 3 & 4: 确定要写入的 Hash ────────────────────────
+    let rawToken: string | undefined = undefined;
+    let tokenHash: string;
 
-    // ── Step 4: 对 Token 进行 SHA-256 哈希 ───────────────────
-    // KV 中仅存储哈希值，即便数据库泄露也无法反推原始 Token
-    const tokenHash = await hashToken(rawToken);
+    if (providedHash) {
+        // 核心目标：如果主站传来了 hash，必须使用并只写入这个 hash
+        tokenHash = providedHash;
+    } else {
+        // 向后兼容逻辑：如果没有传 hash，则本地生成一个全新的并做哈希
+        rawToken = `us-${crypto.randomUUID()}`;
+        tokenHash = await hashToken(rawToken);
+    }
 
     // ── Step 5: 将哈希值作为 Key 写入 KV，存储信用额度 ────────
     await env.UNISKILL_KV.put(tokenHash, String(initialCredits));
