@@ -1,0 +1,27 @@
+# ============================================================
+# UniSkill Gateway — Wrangler Configuration
+# 部署目标: Cloudflare Workers
+# ============================================================
+
+name            = "uniskill-gateway"
+main            = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Workers 运行时支持的最新兼容性标志
+compatibility_flags = ["nodejs_compat"]
+
+# ── KV 命名空间绑定 ──────────────────────────────────────────
+# 本地开发时使用 preview_id；生产部署时使用 id。
+# 请将下方占位符替换为你在 Cloudflare Dashboard 中创建的 KV namespace ID。
+[[kv_namespaces]]
+binding = "UNISKILL_KV"    # 代码中通过 env.UNISKILL_KV 访问
+id      = "9f388e510ffc426c8320f839ae769fe3"
+
+# ── 密钥变量 ────────────────────────────────────────────────
+# TAVILY_API_KEY 不应明文写入此文件。
+# 部署前请运行: npx wrangler secret put TAVILY_API_KEY
+# 本地开发请在 .dev.vars 文件中添加: TAVILY_API_KEY=tvly-xxxxxxxxxxxx
+
+# ── npm 脚本建议 (在 package.json 中配置) ───────────────────
+# dev:    npx wrangler dev
+# deploy: npx wrangler deploy
