@@ -17,10 +17,18 @@ compatibility_flags = ["nodejs_compat"]
 binding = "UNISKILL_KV"    # 代码中通过 env.UNISKILL_KV 访问
 id      = "9f388e510ffc426c8320f839ae769fe3"
 
-# ── 密钥变量 ────────────────────────────────────────────────
-# TAVILY_API_KEY 不应明文写入此文件。
-# 部署前请运行: npx wrangler secret put TAVILY_API_KEY
-# 本地开发请在 .dev.vars 文件中添加: TAVILY_API_KEY=tvly-xxxxxxxxxxxx
+# ── 密钥变量（所有真实 API Key 均通过 Cloudflare Secret 注入，绝不明文入库）───
+# Tavily Search & News API Key
+#   部署: npx wrangler secret put TAVILY_API_KEY
+#   本地: 在 .dev.vars 文件中添加 TAVILY_API_KEY=tvly-xxxxxxxxxxxx
+#
+# Jina AI Reader API Key（供 /v1/scrape 技能使用）
+#   部署: npx wrangler secret put JINA_API_KEY
+#   本地: 在 .dev.vars 文件中添加 JINA_API_KEY=jina_xxxxxxxxxxxx
+#
+# Admin 共享密钥（供 Vercel 等受信任后端调用 /admin/provision）
+#   部署: npx wrangler secret put ADMIN_KEY
+#   本地: 在 .dev.vars 文件中添加 ADMIN_KEY=your-admin-secret
 
 # ── npm 脚本建议 (在 package.json 中配置) ───────────────────
 # dev:    npx wrangler dev

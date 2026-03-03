@@ -25,17 +25,19 @@ export async function getCredits(kv: KVNamespace, tokenHash: string): Promise<nu
 }
 
 /**
- * Deducts exactly 1 credit from the token hash's balance and persists it back to KV.
+ * Deducts `cost` credits from the token hash's balance and persists it back to KV.
  * NOTE: Cloudflare KV does not support atomic decrement; this is a best-effort write.
  *       For high-concurrency production use, consider Durable Objects instead.
  *
  * 参数 tokenHash 必须是已哈希的值（由 hashToken() 产生）。
+ * 参数 cost 为本次请求消耗的信用点数，默认为 1（各技能可按需传入不同值）。
  */
 export async function deductCredit(
     kv: KVNamespace,
     tokenHash: string,
-    currentCredits: number
+    currentCredits: number,
+    cost = 1
 ): Promise<void> {
-    // 将新余额写回 KV
-    await kv.put(tokenHash, String(currentCredits - 1));
+    // 将扣减后的新余额（currentCredits - cost）写回 KV
+    await kv.put(tokenHash, String(currentCredits - cost));
 }
