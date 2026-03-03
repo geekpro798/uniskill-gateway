@@ -100,9 +100,9 @@ export async function handleNews(
         });
     }
 
-    // ── Step 6: 成功后在后台异步扣除信用（不阻塞响应）──────────
+    // ── Step 6: 成功后在后台异步扣除信用，并同步到 Supabase ──
     const newBalance = credits - NEWS_COST;
-    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, NEWS_COST));
+    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, NEWS_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "News Search"));
 
     // ── Step 7: 构建 Agent 友好的新闻结构化响应 ──────────────
     // Tavily 返回结果中 results[] 每条含 title、url、content、published_date 等字段

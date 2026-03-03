@@ -94,10 +94,10 @@ export async function handleScrape(
         );
     }
 
-    // ── Step 5: 成功获取内容后扣除信用 ────────────────────────
+    // ── Step 5: 成功获取内容后扣除信用，并同步到 Supabase ─────
     // 扣减操作在后台异步执行（waitUntil），不阻塞用户响应
     const newBalance = credits - SCRAPE_COST;
-    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, SCRAPE_COST));
+    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, SCRAPE_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "Web Scrape"));
 
     // ── Step 6: 构建 Agent 友好的结构化响应 ──────────────────
     const markdownContent = await jinaRes.text();

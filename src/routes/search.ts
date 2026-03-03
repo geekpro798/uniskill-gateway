@@ -103,10 +103,10 @@ export async function handleSearch(
         });
     }
 
-    // ── Step 6: 成功后在后台异步扣除信用（不阻塞响应速度）──────
-    // waitUntil 确保扣费写入 KV 的操作在响应返回后继续执行
+    // ── Step 6: 成功后在后台异步扣除信用，并同步到 Supabase ──
+    // waitUntil 确保扣费+回写操作在响应返回后继续执行，不阻塞主路径
     const newBalance = credits - SEARCH_COST;
-    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, SEARCH_COST));
+    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, SEARCH_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "Web Search"));
 
     // ── Step 7: 构建 Agent 友好的结构化搜索响应 ──────────────
     const tavilyData = (await tavilyRes.json()) as {

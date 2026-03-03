@@ -21,6 +21,8 @@ export interface Env {
   JINA_API_KEY: string;
   /** Admin 共享密钥，通过 Cloudflare Secret 注入，供 Vercel 后端调用 */
   ADMIN_KEY: string;
+  /** Vercel Webhook URL，扣分后用于将新余额同步写回 Supabase */
+  VERCEL_WEBHOOK_URL: string;
 }
 
 // ── 路由表：路径 → 对应的技能处理函数 ──────────────────────

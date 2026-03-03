@@ -29,6 +29,10 @@ id      = "9f388e510ffc426c8320f839ae769fe3"
 # Admin 共享密钥（供 Vercel 等受信任后端调用 /admin/provision）
 #   部署: npx wrangler secret put ADMIN_KEY
 #   本地: 在 .dev.vars 文件中添加 ADMIN_KEY=your-admin-secret
+#
+# Vercel Webhook URL（扣分后回写 Supabase 用）
+#   部署: npx wrangler secret put VERCEL_WEBHOOK_URL
+#   本地: 在 .dev.vars 文件中添加 VERCEL_WEBHOOK_URL=https://your-site.vercel.app/api/webhook/sync-credits
 
 # ── npm 脚本建议 (在 package.json 中配置) ───────────────────
 # dev:    npx wrangler dev
