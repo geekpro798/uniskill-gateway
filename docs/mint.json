@@ -1,0 +1,44 @@
+{
+    "name": "UniSkill",
+    "logo": {
+        "light": "/logo/light.png",
+        "dark": "/logo/dark.png"
+    },
+    "favicon": "/favicon.png",
+    "colors": {
+        "primary": "#007BFF",
+        "light": "#00F5FF",
+        "dark": "#0056b3"
+    },
+    "topbarLinks": [
+        {
+            "name": "Dashboard",
+            "url": "https://uniskill.ai/dashboard"
+        }
+    ],
+    "navigation": [
+        {
+            "group": "Getting Started",
+            "pages": [
+                "introduction",
+                "quickstart"
+            ]
+        },
+        {
+            "group": "Core Concepts",
+            "pages": [
+                "credits",
+                "rate-limits"
+            ]
+        },
+        { group: "Skill Catalog", pages: [
+                "api-reference/search",
+                "api-reference/scrape"
+            ]
+        }
+    ],
+    "footerSocials": {
+        "github": "https://github.com/uniskillai",
+        "x": "https://x.com/Lemontree2050"
+    }
+}
