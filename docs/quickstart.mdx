@@ -1,0 +1,24 @@
+---
+title: "Quickstart"
+description: "Start building with UniSkill in under 5 minutes."
+---
+
+## 1. Get your API Key
+
+访问 [UniSkill Dashboard](https://uniskill.ai/dashboard) 获取你的 API 密钥。
+
+## 2. Make your first request
+
+使用 `curl` 测试你的密钥：
+
+```bash
+curl https://api.uniskill.ai/v1/search \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Hello UniSkill"}'
+```
+
+## 3. Next Steps
+
+- 查看 [Web Search](/api-reference/search) 了解更多搜索参数。
+- 了解 [Credits & Billing](/credits) 政策。
