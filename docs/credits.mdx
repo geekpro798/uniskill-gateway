@@ -1,20 +1,63 @@
 ---
 title: "Credits & Billing"
-description: "Understanding the UniSkill credit system and rollover policy."
+description: "Detailed breakdown of UniSkill subscription tiers, credit costs, and usage policies."
 ---
 
-## Credit System Overview
+## Overview
 
-UniSkill 使用积分制计费，确保你只需为实际使用的能力付费。
+UniSkill operates on a transparent, credit-based model. Your subscription provides a monthly allowance of credits that can be used across all available skills.
 
-### Weight Table (权重表)
+### One Key. Infinite Skills.
+Access every capability in our ecosystem—from web search to deep scraping—using a single API key.
+
+---
+
+## Subscription Tiers
+
+Choose the plan that best fits your agent's workload. Higher tiers offer increased rate limits and longer data retention for auditing.
+
+| Tier | Price | Monthly Credits Included | Rate Limit (RPM) | Log Retention |
+| :--- | :--- | :--- | :--- | :--- |
+| **Free** | $0 | 500 | 30 | 3 Days |
+| **Starter** | $9.90 | 10,000 | 60 | 7 Days |
+| **Pro** | $29.90 | 35,000 | 300 | 30 Days |
+| **Scale** | $99.90 | 150,000 | 1,000 | 90 Days |
+
+---
+
+## Credit Weights
+
+Credits are deducted from your balance based on the complexity of the skill invoked:
 
 | Skill | Description | Cost |
 | :--- | :--- | :--- |
-| `uniskill_search` | 全球联网搜索 | 10 pts / call |
-| `uniskill_scrape` | 深度网页抓取 | 20 pts / page |
+| `uniskill_search` | Real-time global web search | 10 pts / call |
+| `uniskill_scrape` | Full-page Markdown extraction | 20 pts / page |
+| `uniskill_social` | Social platform data mining | 30 pts / query |
 
-### Rollover Policy (结转政策)
+---
 
-UniSkill 的核心优势在于 **"Credits never expire"**。
-只要你的订阅（Starter, Pro 或 Scale）保持活跃，所有未消耗的积分将自动滚动到下一个计费周期，永久有效。
+## Lifetime Rollover Policy
+
+We value your investment. UniSkill ensures that you never lose the credits you've paid for through our **Lifetime Rollover** policy.
+
+* **Indefinite Rollover**: Unused credits from your monthly allowance automatically carry over to the next billing cycle.
+* **Active Status Required**: Rollover remains active as long as you maintain a valid subscription (Starter, Pro, or Scale).
+* **Optimization**: Our gateway always utilizes the oldest credits in your account first.
+
+---
+
+## API Usage Monitoring
+
+You can track your consumption and remaining balance through the [UniSkill Dashboard](https://uniskill.ai/dashboard). Every API response also includes a metadata header confirming the credits consumed by that specific request.
+
+```json
+{
+  "status": "success",
+  "data": {
+    "results": [...],
+    "credits_used": 10,
+    "remaining_credits": 149990
+  }
+}
+```
