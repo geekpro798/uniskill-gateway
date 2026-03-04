@@ -43,3 +43,4 @@ id      = "9f388e510ffc426c8320f839ae769fe3"
 [vars]
 SUPABASE_URL = "https://iwijeijjpnojtolvcxtp.supabase.co"
 ENVIRONMENT = "production"
+
