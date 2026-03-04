@@ -27,6 +27,7 @@ export async function handleProvision(request: Request, env: Env): Promise<Respo
     // ── Step 2: 解析可选的请求体参数 ─────────────────────────
     let initialCredits = DEFAULT_INITIAL_CREDITS;
     let providedHash: string | undefined = undefined;
+    let userTier = "FREE";
 
     try {
         const body = await request.json() as Record<string, unknown>;
@@ -35,6 +36,9 @@ export async function handleProvision(request: Request, env: Env): Promise<Respo
         }
         if (typeof body.hash === "string" && body.hash.length > 0) {
             providedHash = body.hash;
+        }
+        if (typeof body.tier === "string" && body.tier.length > 0) {
+            userTier = body.tier.toUpperCase();
         }
     } catch {
         // 无 body 或解析失败均使用默认值
@@ -56,12 +60,16 @@ export async function handleProvision(request: Request, env: Env): Promise<Respo
     // ── Step 5: 将哈希值作为 Key 写入 KV，存储信用额度 ────────
     await env.UNISKILL_KV.put(tokenHash, String(initialCredits));
 
+    // ── Step 5.5: 存储用户档位信息 ───────────────────────────
+    await env.UNISKILL_KV.put(`tier:${tokenHash}`, userTier);
+
     // ── Step 6: 返回原始 Token（仅此一次）和元数据 ────────────
     return new Response(
         JSON.stringify({
             success: true,
             raw_token: rawToken,        // 仅返回给前端一次，绝不二次存储
             initial_credits: initialCredits,
+            tier: userTier,
             _uniskill: {
                 request_id: request.headers.get("cf-ray") ?? crypto.randomUUID(),
                 version: GATEWAY_VERSION,

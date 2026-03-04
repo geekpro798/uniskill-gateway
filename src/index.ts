@@ -10,6 +10,8 @@ import { handleScrape } from "./routes/scrape.ts";
 import { handleNews } from "./routes/news.ts";
 import { handleSocial } from "./routes/social.ts";
 import { handleProvision } from "./routes/admin.ts";
+import { checkRateLimit } from "./utils/rate-limit.ts";
+import { hashToken } from "./utils/auth.ts";
 
 // ── 环境变量类型声明（与 wrangler.toml bindings 一一对应）──
 export interface Env {
@@ -101,6 +103,31 @@ async function handleUserRequest(
     );
   }
 
+  // ── 1.5. 速率限制检查 (Rate Limiting) ────────────────────
+  const tokenHash = await hashToken(token);
+  const userTier = (await env.UNISKILL_KV.get(`tier:${tokenHash}`)) || "FREE";
+
+  const rateLimit = await checkRateLimit(tokenHash, userTier, env.UNISKILL_KV);
+
+  if (!rateLimit.isAllowed) {
+    return new Response(JSON.stringify({
+      error: "Too Many Requests",
+      message: `Your current tier (${userTier}) is limited to ${rateLimit.limit} RPM.`,
+      _uniskill: {
+        current_usage: rateLimit.currentUsage,
+        limit: rateLimit.limit,
+        retry_after: 60 - (Math.floor(Date.now() / 1000) % 60)
+      }
+    }), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "X-RateLimit-Limit": rateLimit.limit.toString(),
+        "X-RateLimit-Remaining": "0"
+      }
+    });
+  }
+
   // ── 2. 仅允许 POST 方法进入技能路由 ─────────────────────
   if (method !== "POST") {
     return errorResponse(`Method ${method} not allowed. Use POST.`, 405);
@@ -117,7 +144,13 @@ async function handleUserRequest(
 
   // ── 4. 执行对应的技能处理器 ──────────────────────────────
   // 每个处理器内部负责：SHA-256 哈希 → KV 信用查询 → 调用外部 API → 扣费 → 响应
-  return handler(request, env, token, ctx);
+  const response = await handler(request, env, token, ctx);
+
+  // 注入限流状态头
+  response.headers.set("X-RateLimit-Limit", rateLimit.limit.toString());
+  response.headers.set("X-RateLimit-Remaining", rateLimit.remaining.toString());
+
+  return response;
 }
 
 // ── 主 Fetch 处理器 ───────────────────────────────────────────
