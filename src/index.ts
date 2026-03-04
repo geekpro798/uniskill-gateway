@@ -10,9 +10,10 @@ import { handleScrape } from "./routes/scrape.ts";
 import { handleNews } from "./routes/news.ts";
 import { handleSocial } from "./routes/social.ts";
 import { handleProvision } from "./routes/admin.ts";
-import { checkRateLimit } from "./utils/rate-limit.ts";
+import { checkRateLimit } from "./rateLimit.ts";
 import { hashToken } from "./utils/auth.ts";
 import { fetchUserTier } from "./db.ts";
+import { runDiagnosticTest } from "./test-connection.ts";
 
 // ── 环境变量类型声明（与 wrangler.toml bindings 一一对应）──
 export interface Env {
@@ -120,7 +121,7 @@ async function handleUserRequest(
     ctx.waitUntil(env.UNISKILL_KV.put(`tier:${tokenHash}`, userTier, { expirationTtl: 3600 }));
   }
 
-  const rateLimit = await checkRateLimit(tokenHash, userTier, env.UNISKILL_KV);
+  const rateLimit = await checkRateLimit(token, userTier, env);
 
   if (!rateLimit.isAllowed) {
     return new Response(JSON.stringify({
@@ -186,6 +187,15 @@ export default {
     // 0.5. 动态技能清单：无需鉴权，供 AI Agent 自动发现可用工具
     if (url.pathname === "/v1/skills") {
       return handleGetSkills(request, env);
+    }
+
+    // 0.6. 诊断端点：测试数据库和 KV 连接情况
+    if (url.pathname === "/v1/diag") {
+      const report = await runDiagnosticTest(env);
+      return new Response(JSON.stringify(report, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     // 1. Admin 区域：供 Vercel 等受信任后端同步用户积分

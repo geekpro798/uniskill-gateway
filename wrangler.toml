@@ -5,7 +5,7 @@
 
 name            = "uniskill-gateway"
 main            = "src/index.ts"
-compatibility_date = "2025-01-01"
+compatibility_date = "2026-03-01"
 
 # Workers 运行时支持的最新兼容性标志
 compatibility_flags = ["nodejs_compat"]
@@ -37,3 +37,9 @@ id      = "9f388e510ffc426c8320f839ae769fe3"
 # ── npm 脚本建议 (在 package.json 中配置) ───────────────────
 # dev:    npx wrangler dev
 # deploy: npx wrangler deploy
+
+# ── UniSkill Gateway 环境变量 ────────────────────────────────
+# Environment Variables for UniSkill Gateway
+[vars]
+SUPABASE_URL = "https://iwijeijjpnojtolvcxtp.supabase.co"
+ENVIRONMENT = "production"

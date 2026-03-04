@@ -24,9 +24,9 @@ export interface RateLimitResult {
  * 核心逻辑：使用 Cloudflare KV 实现固定窗口限流
  */
 export async function checkRateLimit(
-    apiKeyHash: string,
+    apiKey: string,
     userTier: string,
-    kv: KVNamespace
+    env: any
 ): Promise<RateLimitResult> {
     // 1. 确定限速阈值
     const tier = userTier.toUpperCase();
@@ -34,10 +34,10 @@ export async function checkRateLimit(
 
     // 2. 使用当前分钟作为时间桶
     const currentMinute = Math.floor(Date.now() / 60000);
-    const storageKey = `ratelimit:${apiKeyHash}:${currentMinute}`;
+    const storageKey = `ratelimit:${apiKey}:${currentMinute}`;
 
     // 3. 读取当前请求计数
-    const kvValue = await kv.get(storageKey);
+    const kvValue = await env.UNISKILL_KV.get(storageKey);
     const usageCount = kvValue ? parseInt(kvValue, 10) : 0;
 
     // 4. 判断是否超限
@@ -52,7 +52,7 @@ export async function checkRateLimit(
 
     // 5. 增加计数并设置 2 分钟 TTL
     const newUsage = usageCount + 1;
-    await kv.put(storageKey, newUsage.toString(), { expirationTtl: 120 });
+    await env.UNISKILL_KV.put(storageKey, newUsage.toString(), { expirationTtl: 120 });
 
     return {
         isAllowed: true,
