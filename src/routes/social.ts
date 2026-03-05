@@ -4,6 +4,8 @@
 // 当前版本返回 501 Coming Soon，预留完整接口结构供后续实现
 // ============================================================
 
+const SOCIAL_COST = 30;
+
 import type { Env } from "../index.ts";
 
 // 本路由占位符——未来集成社交媒体数据源（如 Twitter/X 或 Reddit API）时在此实现
@@ -22,7 +24,7 @@ export async function handleSocial(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _env: Env,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _token: string,
+    _key: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _ctx: ExecutionContext
 ): Promise<Response> {
@@ -32,6 +34,7 @@ export async function handleSocial(
             success: false,
             coming_soon: true,
             skill: "social",
+            planned_cost: SOCIAL_COST,
             message: "The /v1/social skill is under development and not yet available. " +
                 "Please check back later or contact support for updates.",
             available_skills: ["/v1/search", "/v1/scrape", "/v1/news"],

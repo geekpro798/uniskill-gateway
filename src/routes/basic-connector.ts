@@ -1,0 +1,100 @@
+// ============================================================
+// src/routes/basic-connector.ts
+// Logic: Transparent proxy for AI Agents with real-time credit deduction
+// 逻辑：AI Agent 的透明代理，支持实时积分扣除
+// ============================================================
+
+import { getCredits, deductCredit } from "../utils/billing.ts";
+import { hashKey } from "../utils/auth.ts";
+import { errorResponse, buildUniskillMeta } from "../utils/response.ts";
+import type { Env } from "../index.ts";
+
+/**
+ * Logic: Cost per successful proxy request (1 credit)
+ * 逻辑：每次成功代理请求的积分消耗（1 点）
+ */
+const BASIC_CONNECTOR_COST = 1;
+
+/**
+ * Logic: Handle the 'Basic Connector' logic
+ * Flow: Auth -> Request Validation -> Proxy Execution -> Async Billing -> Response
+ * * 逻辑：处理“基础连接器”逻辑
+ * 流程：验证 -> 请求校验 -> 执行代理 -> 异步扣费 -> 返回响应
+ */
+export async function handleBasicConnector(
+    request: Request,
+    env: Env,
+    key: string,
+    ctx: ExecutionContext
+): Promise<Response> {
+
+    // ── Step 1: Security & Balance Check ──────────────────
+    // 逻辑：对 Key 进行哈希处理并检查 KV 中的积分余额
+    const keyHash = await hashKey(key);
+    const currentCredits = await getCredits(env.UNISKILL_KV, keyHash);
+
+    if (currentCredits === -1) {
+        return errorResponse("Invalid API key.", 401);
+    }
+    if (currentCredits < BASIC_CONNECTOR_COST) {
+        return errorResponse("Insufficient credits. Your current balance is lower than the required cost.", 402);
+    }
+
+    // ── Step 2: Payload Parsing ────────────────────────────
+    // 逻辑：解析并验证目标 URL
+    let requestPayload: any;
+    try {
+        requestPayload = await request.json();
+    } catch {
+        return errorResponse("Invalid JSON body in request.", 400);
+    }
+
+    const { url: targetUrl, method, headers: targetHeaders, data: targetData } = requestPayload;
+
+    if (!targetUrl || typeof targetUrl !== "string") {
+        return errorResponse('Missing or invalid "url" field.', 400);
+    }
+
+    // ── Step 3: Proxy Execution ───────────────────────────
+    // 逻辑：向目标 URL 发起代理请求
+    let proxyResponse: Response;
+    try {
+        proxyResponse = await fetch(targetUrl, {
+            method: method || "GET",
+            headers: targetHeaders || {},
+            body: (method && method !== "GET" && targetData) ? JSON.stringify(targetData) : null,
+        });
+    } catch (error: any) {
+        // 逻辑：网络层错误不扣除积分
+        return errorResponse(`Gateway Timeout: Failed to reach target [${targetUrl}]. Error: ${error.message}`, 504);
+    }
+
+    // ── Step 4: Async Billing (Low Latency) ───────────────
+    // 逻辑：使用 ctx.waitUntil 在后台异步更新积分，确保用户感知不到延迟
+    const remainingBalance = currentCredits - BASIC_CONNECTOR_COST;
+    ctx.waitUntil(deductCredit(
+        env.UNISKILL_KV,
+        keyHash,
+        currentCredits,
+        BASIC_CONNECTOR_COST,
+        env.VERCEL_WEBHOOK_URL,
+        env.ADMIN_KEY,
+        "Basic Connector Operation"
+    ));
+
+    // ── Step 5: Optimized Transparent Response ────────────
+    // 逻辑：透传原始响应内容，并注入 UniSkill 基础设施元数据头
+    const responseHeaders = new Headers(proxyResponse.headers);
+    const metaData = buildUniskillMeta(BASIC_CONNECTOR_COST, remainingBalance, request);
+
+    // 逻辑：设置符合国际化标准的自定义 Header 标签
+    responseHeaders.set("X-UniSkill-Status", "Success");
+    responseHeaders.set("X-UniSkill-Consumed", BASIC_CONNECTOR_COST.toString());
+    responseHeaders.set("X-UniSkill-Balance", remainingBalance.toString());
+    responseHeaders.set("X-UniSkill-Request-ID", String(metaData.request_id));
+
+    return new Response(proxyResponse.body, {
+        status: proxyResponse.status,
+        headers: responseHeaders,
+    });
+}

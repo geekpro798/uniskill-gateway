@@ -4,7 +4,7 @@
 // ============================================================
 
 import { getCredits, deductCredit } from "../utils/billing.ts";
-import { hashToken } from "../utils/auth.ts";
+import { hashKey } from "../utils/auth.ts";
 import { errorResponse, buildUniskillMeta } from "../utils/response.ts";
 import type { Env } from "../index.ts";
 
@@ -12,12 +12,12 @@ import type { Env } from "../index.ts";
 // 例如：https://r.jina.ai/https://example.com
 const JINA_READER_BASE = "https://r.jina.ai/";
 
-// 本技能的信用消耗量（每次请求扣 1 点）
-const SCRAPE_COST = 1;
+// 本技能的信用消耗量（每次请求扣 20 点）
+const SCRAPE_COST = 20;
 
 /**
  * Handles POST /v1/scrape
- * Flow: credit check → Jina Reader proxy → credit deduction → return structured result
+ * Flow: key check → Jina Reader proxy → credit deduction → return structured result
  *
  * Request body: { "url": "https://..." }
  * Response:     { url, markdown_content, _uniskill }
@@ -25,21 +25,21 @@ const SCRAPE_COST = 1;
 export async function handleScrape(
     request: Request,
     env: Env,
-    token: string,
+    key: string,
     ctx: ExecutionContext
 ): Promise<Response> {
 
-    // ── Step 1: 对原始 Token 做 SHA-256 哈希，再用哈希值查询 KV 信用余额 ─────
-    // 安全原则：KV 中仅存储哈希值，绝不明文保存原始 Token
-    const tokenHash = await hashToken(token);
-    const credits = await getCredits(env.UNISKILL_KV, tokenHash);
+    // ── Step 1: 对原始 Key 做 SHA-256 哈希，再用哈希值查询 KV 信用余额 ─────
+    // 安全原则：KV 中仅存储哈希值，绝不明文保存原始 Key
+    const keyHash = await hashKey(key);
+    const credits = await getCredits(env.UNISKILL_KV, keyHash);
 
     if (credits === -1) {
-        // KV 中不存在此 hash → token 未被签发或无效
-        return errorResponse("Invalid API token.", 401);
+        // KV 中不存在此 hash → key 未被签发或无效
+        return errorResponse("Invalid API key.", 401);
     }
     if (credits <= 0) {
-        // token 合法但余额耗尽 → 返回 402 Payment Required
+        // key 合法但余额耗尽 → 返回 402 Payment Required
         return errorResponse("Insufficient credits. Please top up your account.", 402);
     }
 
@@ -97,7 +97,7 @@ export async function handleScrape(
     // ── Step 5: 成功获取内容后扣除信用，并同步到 Supabase ─────
     // 扣减操作在后台异步执行（waitUntil），不阻塞用户响应
     const newBalance = credits - SCRAPE_COST;
-    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, SCRAPE_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "Web Scrape"));
+    ctx.waitUntil(deductCredit(env.UNISKILL_KV, keyHash, credits, SCRAPE_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "Web Scrape"));
 
     // ── Step 6: 构建 Agent 友好的结构化响应 ──────────────────
     const markdownContent = await jinaRes.text();

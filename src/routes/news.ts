@@ -4,15 +4,15 @@
 // ============================================================
 
 import { getCredits, deductCredit } from "../utils/billing.ts";
-import { hashToken } from "../utils/auth.ts";
+import { hashKey } from "../utils/auth.ts";
 import { errorResponse, buildUniskillMeta } from "../utils/response.ts";
 import type { Env } from "../index.ts";
 
 // Tavily Search API 端点（news 模式，与通用搜索共用同一 URL）
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 
-// 本技能的信用消耗量（每次请求扣 1 点）
-const NEWS_COST = 1;
+// 本技能的信用消耗量（每次请求扣 10 点）
+const NEWS_COST = 10;
 
 // Tavily 新闻请求中允许用户透传的可选字段白名单
 const NEWS_PASSTHROUGH_KEYS = [
@@ -23,7 +23,7 @@ const NEWS_PASSTHROUGH_KEYS = [
 
 /**
  * Handles POST /v1/news
- * Flow: credit check → Tavily News proxy → credit deduction → return structured articles
+ * Flow: key check → Tavily News proxy → credit deduction → return structured articles
  *
  * Request body: { "query": "AI news today", ...optional fields }
  * Response:     { articles: [{title, url, content, published_date}], _uniskill }
@@ -31,17 +31,17 @@ const NEWS_PASSTHROUGH_KEYS = [
 export async function handleNews(
     request: Request,
     env: Env,
-    token: string,
+    key: string,
     ctx: ExecutionContext
 ): Promise<Response> {
 
-    // ── Step 1: 对原始 Token 做 SHA-256 哈希，再用哈希值查询 KV 信用余额 ─────
-    // 安全原则：KV 中仅索引哈希，绝不明文存储原始 Token
-    const tokenHash = await hashToken(token);
-    const credits = await getCredits(env.UNISKILL_KV, tokenHash);
+    // ── Step 1: 对原始 Key 做 SHA-256 哈希，再用哈希值查询 KV 信用余额 ─────
+    // 安全原则：KV 中仅索引哈希，绝不明文存储原始 Key
+    const keyHash = await hashKey(key);
+    const credits = await getCredits(env.UNISKILL_KV, keyHash);
 
     if (credits === -1) {
-        return errorResponse("Invalid API token.", 401);
+        return errorResponse("Invalid API key.", 401);
     }
     if (credits <= 0) {
         return errorResponse("Insufficient credits. Please top up your account.", 402);
@@ -102,7 +102,7 @@ export async function handleNews(
 
     // ── Step 6: 成功后在后台异步扣除信用，并同步到 Supabase ──
     const newBalance = credits - NEWS_COST;
-    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, NEWS_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "News Search"));
+    ctx.waitUntil(deductCredit(env.UNISKILL_KV, keyHash, credits, NEWS_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "News Search"));
 
     // ── Step 7: 构建 Agent 友好的新闻结构化响应 ──────────────
     // Tavily 返回结果中 results[] 每条含 title、url、content、published_date 等字段

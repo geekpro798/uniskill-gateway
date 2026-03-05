@@ -11,14 +11,14 @@ const getSupabaseClient = (env: any) => {
  * Fetch the user's tier from the 'api_keys' table
  * Returns 'FREE' as a fallback if the key is invalid or an error occurs
  */
-export const fetchUserTier = async (apiKey: string, env: any): Promise<string> => {
+export const fetchUserTier = async (key: string, env: any): Promise<string> => {
     const supabase = getSupabaseClient(env);
 
     // Querying the 'api_keys' table to match the provided key
     const { data, error } = await supabase
         .from('api_keys')
         .select('tier')
-        .eq('key', apiKey)
+        .eq('key', key)
         .single();
 
     if (error) {

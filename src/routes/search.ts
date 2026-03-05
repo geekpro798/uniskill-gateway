@@ -4,15 +4,15 @@
 // ============================================================
 
 import { getCredits, deductCredit } from "../utils/billing.ts";
-import { hashToken } from "../utils/auth.ts";
+import { hashKey } from "../utils/auth.ts";
 import { errorResponse, buildUniskillMeta } from "../utils/response.ts";
 import type { Env } from "../index.ts";
 
 // Tavily Search API 端点
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 
-// 本技能的信用消耗量（每次请求扣 1 点）
-const SEARCH_COST = 1;
+// 本技能的信用消耗量（每次请求扣 10 点）
+const SEARCH_COST = 10;
 
 // 允许透传给 Tavily 的可选字段白名单（防止用户注入非预期参数）
 const TAVILY_PASSTHROUGH_KEYS = [
@@ -25,7 +25,7 @@ const TAVILY_PASSTHROUGH_KEYS = [
 
 /**
  * Handles POST /v1/search
- * Flow: credit check → Tavily proxy → credit deduction → return agent-optimized result
+ * Flow: key check → Tavily proxy → credit deduction → return agent-optimized result
  *
  * Request body: { "query": "...", ...optional Tavily params }
  * Response:     { answer, results: [{title, url, content, score}], _uniskill }
@@ -33,21 +33,21 @@ const TAVILY_PASSTHROUGH_KEYS = [
 export async function handleSearch(
     request: Request,
     env: Env,
-    token: string,
+    key: string,
     ctx: ExecutionContext
 ): Promise<Response> {
 
-    // ── Step 1: 对原始 Token 做 SHA-256 哈希，再用哈希值查询 KV 信用余额 ─────
-    // 哈希化目的：KV 中仅存储不可逆的哈希值，即使 KV 数据泄露也无法还原真实 Token
-    const tokenHash = await hashToken(token);
-    const credits = await getCredits(env.UNISKILL_KV, tokenHash);
+    // ── Step 1: 对原始 Key 做 SHA-256 哈希，再用哈希值查询 KV 信用余额 ─────
+    // 哈希化目的：KV 中仅存储不可逆的哈希值，即使 KV 数据泄露也无法还原真实 Key
+    const keyHash = await hashKey(key);
+    const credits = await getCredits(env.UNISKILL_KV, keyHash);
 
     if (credits === -1) {
-        // KV 中不存在此哈希 → token 未签发或已被吊销
-        return errorResponse("Invalid API token.", 401);
+        // KV 中不存在此哈希 → key 未签发或已被吊销
+        return errorResponse("Invalid API key.", 401);
     }
     if (credits <= 0) {
-        // token 合法但余额耗尽 → 返回 402 Payment Required
+        // key 合法但余额耗尽 → 返回 402 Payment Required
         return errorResponse("Insufficient credits. Please top up your account.", 402);
     }
 
@@ -106,7 +106,7 @@ export async function handleSearch(
     // ── Step 6: 成功后在后台异步扣除信用，并同步到 Supabase ──
     // waitUntil 确保扣费+回写操作在响应返回后继续执行，不阻塞主路径
     const newBalance = credits - SEARCH_COST;
-    ctx.waitUntil(deductCredit(env.UNISKILL_KV, tokenHash, credits, SEARCH_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "Web Search"));
+    ctx.waitUntil(deductCredit(env.UNISKILL_KV, keyHash, credits, SEARCH_COST, env.VERCEL_WEBHOOK_URL, env.ADMIN_KEY, "Web Search"));
 
     // ── Step 7: 构建 Agent 友好的结构化搜索响应 ──────────────
     const tavilyData = (await tavilyRes.json()) as {

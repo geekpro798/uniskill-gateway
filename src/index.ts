@@ -3,13 +3,13 @@
 // 职责：环境类型声明 + 请求路由分发 + 全局中间件（鉴权、限流、CORS）
 // ============================================================
 
-import { extractBearerToken, isValidTokenFormat, hashToken } from "./utils/auth.ts";
+import { extractBearerKey, isValidKeyFormat, hashKey } from "./utils/auth.ts";
 import { errorResponse } from "./utils/response.ts";
 import { handleSearch } from "./routes/search.ts";
 import { handleScrape } from "./routes/scrape.ts";
 import { handleNews } from "./routes/news.ts";
 import { handleSocial } from "./routes/social.ts";
-import { handleConnect } from "./routes/connect.ts";
+import { handleBasicConnector } from "./routes/basic-connector.ts";
 import { handleProvision } from "./routes/admin.ts";
 import { checkRateLimit } from "./rateLimit.ts";
 import { fetchUserTier } from "./db.ts";
@@ -41,25 +41,25 @@ async function handleGetSkills(): Promise<Response> {
     tools: [
       {
         name: "uniskill_search",
-        description: "Real-time web search for news, stocks, and trends.",
+        description: "Real-time web search for news, stocks, and trends. Consumes 10 credits.",
         endpoint: "/v1/search",
         parameters: { query: "string" },
       },
       {
         name: "uniskill_scrape",
-        description: "Extract clean Markdown from any website URL.",
+        description: "Extract clean Markdown from any website URL. Consumes 20 credits.",
         endpoint: "/v1/scrape",
         parameters: { url: "string" },
       },
       {
         name: "uniskill_news",
-        description: "Fetch the latest news articles on any topic.",
+        description: "Fetch the latest news articles on any topic. Consumes 10 credits.",
         endpoint: "/v1/news",
         parameters: { query: "string" },
       },
       {
         name: "uniskill_social",
-        description: "Search social media trends and discussions. (Coming Soon)",
+        description: "Search social media trends and discussions. Consumes 30 credits. (Coming Soon)",
         endpoint: "/v1/social",
         parameters: { query: "string" },
       },
@@ -86,20 +86,20 @@ async function handleUserRequest(
   pathname: string
 ): Promise<Response> {
   // 1. 全局鉴权
-  const token = extractBearerToken(request);
-  if (!token || !isValidTokenFormat(token)) {
+  const key = extractBearerKey(request);
+  if (!key || !isValidKeyFormat(key)) {
     return errorResponse("Missing or invalid Authorization header. Expected: Bearer us-xxxx", 401);
   }
 
   // 2. 速率限制检查
-  const tokenHash = await hashToken(token);
-  let userTier = await env.UNISKILL_KV.get(`tier:${tokenHash}`);
+  const keyHash = await hashKey(key);
+  let userTier = await env.UNISKILL_KV.get(`tier:${keyHash}`);
   if (!userTier) {
-    userTier = await fetchUserTier(token, env);
-    ctx.waitUntil(env.UNISKILL_KV.put(`tier:${tokenHash}`, userTier, { expirationTtl: 3600 }));
+    userTier = await fetchUserTier(key, env);
+    ctx.waitUntil(env.UNISKILL_KV.put(`tier:${keyHash}`, userTier, { expirationTtl: 3600 }));
   }
 
-  const rateLimit = await checkRateLimit(token, userTier, env);
+  const rateLimit = await checkRateLimit(key, userTier, env);
   if (!rateLimit.isAllowed) {
     return new Response(JSON.stringify({
       error: "Too Many Requests",
@@ -132,19 +132,19 @@ async function handleUserRequest(
       }), { status: 200, headers: { "Content-Type": "application/json" } });
       break;
     case "/v1/search":
-      response = await handleSearch(request, env, token, ctx);
+      response = await handleSearch(request, env, key, ctx);
       break;
     case "/v1/scrape":
-      response = await handleScrape(request, env, token, ctx);
+      response = await handleScrape(request, env, key, ctx);
       break;
     case "/v1/news":
-      response = await handleNews(request, env, token, ctx);
+      response = await handleNews(request, env, key, ctx);
       break;
     case "/v1/social":
-      response = await handleSocial(request, env, token, ctx);
+      response = await handleSocial(request, env, key, ctx);
       break;
     case "/v1/connect":
-      response = await handleConnect(request, env, token, ctx);
+      response = await handleBasicConnector(request, env, key, ctx);
       break;
     default:
       return errorResponse(`Route ${pathname} not found.`, 404);
