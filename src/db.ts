@@ -8,25 +8,29 @@ const getSupabaseClient = (env: any) => {
 };
 
 /**
- * Fetch the user's tier from the 'api_keys' table
- * Returns 'FREE' as a fallback if the key is invalid or an error occurs
+ * Fetch the user's data (tier and credits) from the 'profiles' table
+ * Returns default values if the record is missing.
  */
-export const fetchUserTier = async (key: string, env: any): Promise<string> => {
+export const fetchUserDataFromDB = async (
+    keyHash: string,
+    env: any
+): Promise<{ tier: string; credits: number }> => {
     const supabase = getSupabaseClient(env);
 
-    // Querying the 'api_keys' table to match the provided key
+    // 查询 profiles 表，使用已哈希的 key (token_hash) 匹配
     const { data, error } = await supabase
-        .from('api_keys')
-        .select('tier')
-        .eq('key', key)
+        .from("profiles")
+        .select("tier, credits")
+        .eq("key_hash", keyHash)
         .single();
 
     if (error) {
-        // Log database error for internal debugging
-        console.error('Supabase query error:', error.message);
-        return 'FREE';
+        console.error("[DB Fallback] Supabase query error:", error.message);
+        return { tier: "FREE", credits: 0 };
     }
 
-    // Ensure the tier matches the expected configuration (FREE, STARTER, PRO, SCALE)
-    return data?.tier?.toUpperCase() || 'FREE';
+    return {
+        tier: data?.tier?.toUpperCase() || "FREE",
+        credits: typeof data?.credits === "number" ? data.credits : 0,
+    };
 };

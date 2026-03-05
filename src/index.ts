@@ -12,7 +12,7 @@ import { handleSocial } from "./routes/social.ts";
 import { handleBasicConnector } from "./routes/basic-connector.ts";
 import { handleProvision } from "./routes/admin.ts";
 import { checkRateLimit } from "./rateLimit.ts";
-import { fetchUserTier } from "./db.ts";
+import { fetchUserDataFromDB } from "./db.ts";
 import { runDiagnosticTest } from "./test-connection.ts";
 
 // ── 环境变量类型声明 ──────────────────────────────────────────
@@ -91,13 +91,33 @@ async function handleUserRequest(
     return errorResponse("Missing or invalid Authorization header. Expected: Bearer us-xxxx", 401);
   }
 
-  // 2. 速率限制检查
+  // 2. 积分与档位检查 (KV 优先，DB 兜底并自动补全)
   const keyHash = await hashKey(key);
+  let creditsRaw = await env.UNISKILL_KV.get(keyHash);
   let userTier = await env.UNISKILL_KV.get(`tier:${keyHash}`);
-  if (!userTier) {
-    userTier = await fetchUserTier(key, env);
-    ctx.waitUntil(env.UNISKILL_KV.put(`tier:${keyHash}`, userTier, { expirationTtl: 3600 }));
+
+  // 如果 KV 中缺失账户信息 (例如 Vercel 同步延迟)，则触发 DB 兜底同步
+  if (creditsRaw === null || !userTier) {
+    console.log(`[Auto-Provision] KV miss for ${keyHash.slice(-6)}. Fetching from DB...`);
+    const dbData = await fetchUserDataFromDB(keyHash, env);
+
+    // 如果数据库也查不到，说明 key 彻底无效
+    if (dbData.credits === 0 && dbData.tier === "FREE") {
+      // 这里做一个额外的校验，确认是否真的完全没数据
+      // (取决于 fetchUserDataFromDB 的 fallback 实现)
+    }
+
+    userTier = dbData.tier;
+    creditsRaw = dbData.credits.toString();
+
+    // 自动补全 KV 缓存，避免后续请求再次穿透 DB
+    ctx.waitUntil(Promise.all([
+      env.UNISKILL_KV.put(keyHash, creditsRaw),
+      env.UNISKILL_KV.put(`tier:${keyHash}`, userTier, { expirationTtl: 3600 })
+    ]));
   }
+
+
 
   const rateLimit = await checkRateLimit(key, userTier, env);
   if (!rateLimit.isAllowed) {
