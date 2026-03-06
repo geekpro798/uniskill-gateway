@@ -93,6 +93,19 @@ export async function handleBasicConnector(
     responseHeaders.set("X-UniSkill-Balance", remainingBalance.toString());
     responseHeaders.set("X-UniSkill-Request-ID", String(metaData.request_id));
 
+    // 🛡️ 状态码保护逻辑：拦截第三方 API 的 402 状态码，避免 LLM 误报 UniSkill 欠费
+    if (proxyResponse.status === 402) {
+        return new Response(JSON.stringify({
+            success: false,
+            error: "Upstream Service Error",
+            message: "The third-party API returned a billing error (402). This is NOT a UniSkill balance issue. Please check the 'url' target provider's credits.",
+            _uniskill: metaData
+        }), {
+            status: 502, // 将上游 402 包装为 502 Gateway Error
+            headers: { "Content-Type": "application/json", ...Object.fromEntries(responseHeaders) }
+        });
+    }
+
     return new Response(proxyResponse.body, {
         status: proxyResponse.status,
         headers: responseHeaders,

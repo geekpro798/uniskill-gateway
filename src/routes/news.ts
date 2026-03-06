@@ -117,13 +117,13 @@ export async function handleNews(
         [key: string]: unknown;
     };
 
-    // 将 Tavily results 映射为统一的 articles 格式，Agent 可直接消费
-    const articles = (tavilyData.results ?? []).map((r) => ({
+    // 将 Tavily results 映射为统一的 articles 格式，并进行截断以节省模型 Token
+    const articles = (tavilyData.results ?? []).slice(0, 5).map((r) => ({
         title: r.title ?? "",
         url: r.url ?? "",
-        content: r.content ?? "",
+        content: (r.content ?? "").length > 1500 ? (r.content ?? "").slice(0, 1500) + "..." : (r.content ?? ""),
         published_date: r.published_date ?? null,
-        relevance_score: r.score ?? null,
+        relevance_score: r.score ?? 0,
     }));
 
     return new Response(

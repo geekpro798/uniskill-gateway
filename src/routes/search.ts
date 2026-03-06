@@ -120,12 +120,12 @@ export async function handleSearch(
         [key: string]: unknown;
     };
 
-    // 将 Tavily results 规范化为 Agent 易于处理的格式
-    const results = (tavilyData.results ?? []).map((r) => ({
+    // 将 Tavily results 规范化为 Agent 易于处理的格式，并进行截断以节省模型 Token
+    const results = (tavilyData.results ?? []).slice(0, 5).map((r) => ({
         title: r.title ?? "",
         url: r.url ?? "",
-        content: r.content ?? "",
-        relevance_score: r.score ?? null,
+        content: (r.content ?? "").length > 1500 ? (r.content ?? "").slice(0, 1500) + "..." : (r.content ?? ""),
+        relevance_score: r.score ?? 0,
     }));
 
     return new Response(
