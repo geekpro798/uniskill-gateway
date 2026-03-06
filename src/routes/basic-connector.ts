@@ -93,6 +93,15 @@ export async function handleBasicConnector(
     responseHeaders.set("X-UniSkill-Balance", remainingBalance.toString());
     responseHeaders.set("X-UniSkill-Request-ID", String(metaData.request_id));
 
+    // ── Logic: Add deep diagnostics for upstream issues ──
+    // 逻辑：标记错误来源，告知工具调用者这是 UniSkill 的问题还是上游供应商的问题
+    if (proxyResponse.status >= 400) {
+        responseHeaders.set("X-UniSkill-Error-Source", "Upstream-Provider");
+        responseHeaders.set("X-UniSkill-Upstream-Status", proxyResponse.status.toString());
+    } else {
+        responseHeaders.set("X-UniSkill-Error-Source", "None");
+    }
+
     // 🛡️ 状态码保护逻辑：拦截第三方 API 的 402 状态码，避免 LLM 误报 UniSkill 欠费
     if (proxyResponse.status === 402) {
         return new Response(JSON.stringify({
