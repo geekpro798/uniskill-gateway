@@ -4,10 +4,10 @@
   "description": "Managed API Gateway for AI Agents — powered by Cloudflare Workers",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --remote",
     "deploy": "wrangler deploy",
-    "type-check": "tsc --noEmit",
-    "test": "echo \"No tests yet\" && exit 0"
+    "sync": "npx tsx scripts/sync-skills.ts",
+    "type-check": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -15,10 +15,12 @@
   "type": "module",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260305.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "wrangler": "^4.69.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.98.0"
+    "@supabase/supabase-js": "^2.98.0",
+    "yaml": "^2.8.2"
   }
 }

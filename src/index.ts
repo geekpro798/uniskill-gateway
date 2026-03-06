@@ -1,248 +1,109 @@
-// ============================================================
-// src/index.ts — UniSkill Gateway Entry Point
-// 职责：环境类型声明 + 请求路由分发 + 全局中间件（鉴权、限流、CORS）
-// ============================================================
+// src/index.ts
+// Logic: Gateway entry point using key-based authentication
+// 职责：环境类型声明 + 请求路由分发 + 全局中间件（统一鉴权与平台化执行）
 
-import { extractBearerKey, isValidKeyFormat, hashKey } from "./utils/auth.ts";
-import { errorResponse } from "./utils/response.ts";
-import { handleSearch } from "./routes/search.ts";
-import { handleScrape } from "./routes/scrape.ts";
-import { handleNews } from "./routes/news.ts";
-import { handleSocial } from "./routes/social.ts";
-import { handleBasicConnector } from "./routes/basic-connector.ts";
-import { handleProvision } from "./routes/admin.ts";
-import { checkRateLimit } from "./rateLimit.ts";
-import { fetchUserDataFromDB } from "./db.ts";
-import { runDiagnosticTest } from "./test-connection.ts";
+import { hashKey } from "./utils/auth";
+import { SkillKeys } from "./utils/skill-keys";
+import { executeSkill } from "./engine/executor"; // 逻辑：引入核心执行引擎
 
 // ── 环境变量类型声明 ──────────────────────────────────────────
 export interface Env {
   UNISKILL_KV: KVNamespace;
-  TAVILY_API_KEY: string;
+  TAVILY_API_KEY: string; // 逻辑：与 executor.ts 和 .dev.vars 中的命名严格对齐
   JINA_API_KEY: string;
+  NEWS_API_KEY: string;
   ADMIN_KEY: string;
   VERCEL_WEBHOOK_URL: string;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
 }
 
-// ── 静态配置 ───────────────────────────────────────────────
-const CORS_HEADERS = {
+// Logic: Centralized CORS headers to prevent cross-origin errors on failure
+// 逻辑：集中管理 CORS 头，防止失败响应时出现跨域错误掩盖真实状态码
+const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-// ── 辅助函数：处理技能清单 ─────────────────────────────────────
-async function handleGetSkills(): Promise<Response> {
-  const skillManifest = {
-    version: "v1",
-    status: "stable",
-    tools: [
-      {
-        name: "uniskill_search",
-        description: "Real-time web search for news, stocks, and trends. Consumes 10 credits.",
-        endpoint: "/v1/search",
-        parameters: { query: "string" },
-      },
-      {
-        name: "uniskill_scrape",
-        description: "Extract clean Markdown from any website URL. Consumes 20 credits.",
-        endpoint: "/v1/scrape",
-        parameters: { url: "string" },
-      },
-      {
-        name: "uniskill_news",
-        description: "Fetch the latest news articles on any topic. Consumes 10 credits.",
-        endpoint: "/v1/news",
-        parameters: { query: "string" },
-      },
-      {
-        name: "uniskill_social",
-        description: "Search social media trends and discussions. Consumes 30 credits. (Coming Soon)",
-        endpoint: "/v1/social",
-        parameters: { query: "string" },
-      },
-      {
-        name: "uniskill_connect",
-        description: "Transparent proxy connector for any API. Consumes 1 credit.",
-        endpoint: "/v1/connect",
-        parameters: { url: "string", method: "string", headers: "object", data: "object" },
-      },
-    ],
-  };
-
-  return new Response(JSON.stringify(skillManifest, null, 2), {
-    status: 200,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-  });
-}
-
-// ── 用户请求处理器（包含鉴权与限流） ─────────────────────────────
-async function handleUserRequest(
-  request: Request,
-  env: Env,
-  ctx: ExecutionContext,
-  pathname: string
-): Promise<Response> {
-  // 1. 全局鉴权
-  const key = extractBearerKey(request);
-  if (!key || !isValidKeyFormat(key)) {
-    return errorResponse("Missing or invalid Authorization header. Expected: Bearer us-xxxx", 401);
-  }
-
-  // 2. 积分与档位检查 (KV 优先，DB 兜底并自动补全)
-  const keyHash = await hashKey(key);
-  let creditsRaw = await env.UNISKILL_KV.get(keyHash);
-  let userTier = await env.UNISKILL_KV.get(`tier:${keyHash}`);
-
-  // 如果 KV 中缺失账户信息 (例如 Vercel 同步延迟)，则触发 DB 兜底同步
-  if (creditsRaw === null || !userTier) {
-    console.log(`[Auto-Provision] KV miss for ${keyHash.slice(-6)}. Fetching from DB...`);
-    const dbData = await fetchUserDataFromDB(keyHash, env);
-
-    // 如果数据库也查不到，说明 key 彻底无效
-    if (dbData.credits === 0 && dbData.tier === "FREE") {
-      // 这里做一个额外的校验，确认是否真的完全没数据
-      // (取决于 fetchUserDataFromDB 的 fallback 实现)
+export default {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    // ── Preflight: Handle CORS ──
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
     }
 
-    userTier = dbData.tier;
-    creditsRaw = dbData.credits.toString();
+    // ── Step 1: Extract 'key' from Header ──
+    // 逻辑：从 Authorization 头中提取原始 key
+    const authHeader = request.headers.get("Authorization") || "";
+    const rawKey = authHeader.replace("Bearer ", "").trim();
 
-    // 自动补全 KV 缓存，避免后续请求再次穿透 DB，直接 await 防止路由取到过时数据
-    await Promise.all([
-      env.UNISKILL_KV.put(keyHash, creditsRaw),
-      env.UNISKILL_KV.put(`tier:${keyHash}`, userTier, { expirationTtl: 3600 })
-    ]);
-  }
+    if (!rawKey.startsWith("us-")) {
+      return new Response("Invalid Key Format", { status: 401, headers: corsHeaders });
+    }
 
+    // ── Step 2: Generate key_hash for Storage Lookup ──
+    // 逻辑：生成 key 的 SHA-256 哈希值，用于 KV 查询
+    const keyHash = await hashKey(rawKey);
 
+    // ── Step 3: Resolve Skill with Priority ──
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response("Invalid JSON Body", { status: 400, headers: corsHeaders });
+    }
 
-  const rateLimit = await checkRateLimit(key, userTier, env);
-  if (!rateLimit.isAllowed) {
-    return new Response(JSON.stringify({
-      error: "Too Many Requests",
-      message: `Your current tier (${userTier}) is limited to ${rateLimit.limit} RPM.`,
-      _uniskill: {
-        current_usage: rateLimit.currentUsage,
-        limit: rateLimit.limit,
-        retry_after: 60 - (Math.floor(Date.now() / 1000) % 60)
+    // 逻辑：不仅提取技能名，还要提取传给技能的具体参数 params
+    const { skillName, params } = body;
+    if (!skillName) {
+      return new Response("Missing skillName in request body", { status: 400, headers: corsHeaders });
+    }
+
+    // 1. Try Private Vault
+    let skillRaw = await env.UNISKILL_KV.get(SkillKeys.private(keyHash, skillName));
+
+    // 2. Fallback to Official
+    if (!skillRaw) {
+      skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(skillName));
+    }
+
+    if (!skillRaw) return new Response("Skill Not Found", { status: 404, headers: corsHeaders });
+
+    // ── Step 4: Billing Check (The Bouncer) ──
+    // 逻辑：执行前核对积分余额
+    const creditKey = SkillKeys.credits(keyHash);
+    let currentCreditsStr = await env.UNISKILL_KV.get(creditKey);
+    let currentCredits = currentCreditsStr ? parseInt(currentCreditsStr, 10) : 0;
+
+    // 逻辑：动态计算成本：Scrape 扣 20，Search/News 扣 10，其余扣 1
+    let skillCost = 1;
+    if (skillName === "uniskill_search" || skillName === "uniskill_news" || skillName === "news") {
+      skillCost = 10;
+    } else if (skillName === "uniskill_scrape" || skillName === "scrape") {
+      skillCost = 20;
+    }
+
+    // 逻辑：如果积分不足以支付本次调用成本，返回 402 Payment Required 状态码
+    if (currentCredits < skillCost) {
+      return new Response(`Insufficient Credits. This skill costs ${skillCost}, but you have ${currentCredits}.`, { status: 402, headers: corsHeaders });
+    }
+
+    // ── Step 5: Engine Execution (The Muscle) ──
+    // 逻辑：将解析好的 Markdown 规约、AI 参数和环境变量喂给引擎
+    const executionResult = await executeSkill(skillRaw, params || {}, env);
+
+    // ── Step 6: Post-Execution Billing ──
+    // 逻辑：执行成功后，按照成本扣除积分并写回 KV
+    await env.UNISKILL_KV.put(creditKey, (currentCredits - skillCost).toString());
+
+    // 逻辑：返回引擎执行的结果（可能是清洗后的 Markdown，也可能是透传的 JSON）
+    return new Response(executionResult, {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json" // 根据您实际返回的数据类型，也可以是 text/markdown
       }
-    }), {
-      status: 429,
-      headers: { "Content-Type": "application/json", "X-RateLimit-Limit": rateLimit.limit.toString() }
     });
   }
-
-  // 3. 仅允许 POST 方法进入技能路由
-  if (request.method !== "POST") {
-    return errorResponse(`Method ${request.method} not allowed. Use POST.`, 405);
-  }
-
-  // 4. 路由分发
-  let response: Response;
-  switch (pathname) {
-    case "/v1/verify":
-      // 如果执行到这里，说明鉴权和限流均已通过
-      response = new Response(JSON.stringify({
-        success: true,
-        message: "API Key is valid",
-        tier: userTier
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-      break;
-    case "/v1/search":
-      response = await handleSearch(request, env, key, ctx);
-      break;
-    case "/v1/scrape":
-      response = await handleScrape(request, env, key, ctx);
-      break;
-    case "/v1/news":
-      response = await handleNews(request, env, key, ctx);
-      break;
-    case "/v1/social":
-      response = await handleSocial(request, env, key, ctx);
-      break;
-    case "/v1/connect":
-      response = await handleBasicConnector(request, env, key, ctx);
-      break;
-    default:
-      return errorResponse(`Route ${pathname} not found.`, 404);
-  }
-
-  // 5. 注入限流状态头
-  response.headers.set("X-RateLimit-Limit", rateLimit.limit.toString());
-  response.headers.set("X-RateLimit-Remaining", rateLimit.remaining.toString());
-  // 附加 CORS 头以便 Web 端调用
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => response.headers.set(k, v));
-
-  return response;
-}
-
-// ── 主 Fetch 处理器 ───────────────────────────────────────────
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const { pathname } = url;
-
-    // 1. 处理 CORS 预检
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: CORS_HEADERS });
-    }
-
-    try {
-      // 2. 核心路由表
-      switch (pathname) {
-        // --- 系统与工具路由 ---
-        case "/":
-        case "/health":
-          return new Response(JSON.stringify({ status: "operational", service: "UniSkill Gateway" }), {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
-          });
-
-        case "/v1/skills":
-          return await handleGetSkills();
-
-        case "/v1/diag":
-          const report = await runDiagnosticTest(env);
-          return new Response(JSON.stringify(report, null, 2), {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
-          });
-
-        // --- Admin 管理路由 ---
-        case "/admin/provision":
-        case "/v1/admin/provision":
-          const authHeader = request.headers.get("Authorization");
-          if (authHeader !== `Bearer ${env.ADMIN_KEY}`) {
-            return new Response("Unauthorized Admin", { status: 401 });
-          }
-          if (request.method !== "POST") {
-            return errorResponse(`Method ${request.method} not allowed. Use POST.`, 405);
-          }
-          return handleProvision(request, env);
-
-        // --- 用户技能路由 (进入流水线：鉴权 -> 限流 -> 执行) ---
-        default:
-          if (pathname.startsWith("/v1/")) {
-            return await handleUserRequest(request, env, ctx, pathname);
-          }
-          return errorResponse(`Route ${pathname} not found.`, 404);
-      }
-    } catch (error: any) {
-      // 3. 全局错误捕获
-      console.error(`Gateway Error [${pathname}]:`, error.message);
-      return new Response(
-        JSON.stringify({
-          error: "Internal Gateway Error",
-          message: error.message
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...CORS_HEADERS }
-        }
-      );
-    }
-  },
 };

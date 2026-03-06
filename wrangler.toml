@@ -1,46 +1,42 @@
 # ============================================================
-# UniSkill Gateway — Wrangler Configuration
-# 部署目标: Cloudflare Workers
+# UniSkill Gateway - Cloudflare Workers Configuration
 # ============================================================
 
-name            = "uniskill-gateway"
-main            = "src/index.ts"
-compatibility_date = "2026-03-01"
+# Logic: Project identifier in Cloudflare dashboard
+# 逻辑：在 Cloudflare 仪表盘中显示的项目名称
+name = "uniskill-gateway"
 
-# Workers 运行时支持的最新兼容性标志
+# Logic: Main entry point of the refactored engine
+# 逻辑：重构后引擎的总路由入口文件
+main = "src/index.ts"
+
+# Logic: Ensures the worker uses the V8 engine features available on this date
+# 逻辑：确保 Worker 使用该日期及之前的 V8 引擎特性，保证向后兼容性
+compatibility_date = "2024-03-06"
+
+# Logic: Supporting natively implemented Node.js APIs
+# 逻辑：支持原生实现的 Node.js API
 compatibility_flags = ["nodejs_compat"]
 
-# ── KV 命名空间绑定 ──────────────────────────────────────────
-# 本地开发时使用 preview_id；生产部署时使用 id。
-# 请将下方占位符替换为你在 Cloudflare Dashboard 中创建的 KV namespace ID。
+
+# ── KV Storage Bindings ─────────────────────────────────────
+# Logic: Binds the KV namespace to the 'UNISKILL_KV' variable in the Env interface
+# 逻辑：将 KV 命名空间绑定到代码中 Env 接口的 'UNISKILL_KV' 变量
+
 [[kv_namespaces]]
-binding = "UNISKILL_KV"    # 代码中通过 env.UNISKILL_KV 访问
-id      = "9f388e510ffc426c8320f839ae769fe3"
+binding = "UNISKILL_KV"
+# Logic: REPLACE THIS with your actual KV ID from the Cloudflare Dashboard
+# 逻辑：请替换为您在 Cloudflare 控制台创建的真实 KV ID
+id = "9f388e510ffc426c8320f839ae769fe3"
 
-# ── 密钥变量（所有真实 API Key 均通过 Cloudflare Secret 注入，绝不明文入库）───
-# Tavily Search & News API Key
-#   部署: npx wrangler secret put TAVILY_API_KEY
-#   本地: 在 .dev.vars 文件中添加 TAVILY_API_KEY=tvly-xxxxxxxxxxxx
-#
-# Jina AI Reader API Key（供 /v1/scrape 技能使用）
-#   部署: npx wrangler secret put JINA_API_KEY
-#   本地: 在 .dev.vars 文件中添加 JINA_API_KEY=jina_xxxxxxxxxxxx
-#
-# Admin 共享密钥（供 Vercel 等受信任后端调用 /admin/provision）
-#   部署: npx wrangler secret put ADMIN_KEY
-#   本地: 在 .dev.vars 文件中添加 ADMIN_KEY=your-admin-secret
-#
-# Vercel Webhook URL（扣分后回写 Supabase 用）
-#   部署: npx wrangler secret put VERCEL_WEBHOOK_URL
-#   本地: 在 .dev.vars 文件中添加 VERCEL_WEBHOOK_URL=https://your-site.vercel.app/api/webhook/sync-credits
 
-# ── npm 脚本建议 (在 package.json 中配置) ───────────────────
-# dev:    npx wrangler dev
-# deploy: npx wrangler deploy
+# ── Public Environment Variables ────────────────────────────
+# Logic: Non-sensitive variables that can be committed to GitHub
+# 逻辑：非敏感的环境变量，可以安全地提交到 GitHub
 
-# ── UniSkill Gateway 环境变量 ────────────────────────────────
-# Environment Variables for UniSkill Gateway
 [vars]
+# 逻辑：Supabase 的公开 API 地址
 SUPABASE_URL = "https://iwijeijjpnojtolvcxtp.supabase.co"
-ENVIRONMENT = "production"
 
+# 逻辑：用于接收异步计费回调的 Webhook 地址
+VERCEL_WEBHOOK_URL = "https://uniskill.ai/api/webhook/sync-credits"
