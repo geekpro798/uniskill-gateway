@@ -97,9 +97,28 @@ export async function handleSearch(
     // ── Step 5: 上游失败则透传错误状态码，不扣信用 ───────────
     if (!tavilyRes.ok) {
         const errBody = await tavilyRes.text();
+        const headers = new Headers({ "Content-Type": "application/json" });
+
+        // 标记错误来源
+        headers.set("X-UniSkill-Error-Source", "Upstream-Provider");
+        headers.set("X-UniSkill-Upstream-Status", tavilyRes.status.toString());
+
+        // 🛡️ 拦截上游 402，防止 LLM 端误报 UniSkill 余额不足
+        if (tavilyRes.status === 402) {
+            return new Response(JSON.stringify({
+                success: false,
+                error: "Upstream Billing Error",
+                message: "Tavily (Upstream) reported a billing error (402). This is NOT a UniSkill balance issue.",
+                _uniskill: buildUniskillMeta(0, credits, request)
+            }), {
+                status: 502,
+                headers
+            });
+        }
+
         return new Response(errBody, {
             status: tavilyRes.status,
-            headers: { "Content-Type": "application/json" },
+            headers
         });
     }
 

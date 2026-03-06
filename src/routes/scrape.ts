@@ -88,9 +88,28 @@ export async function handleScrape(
     // ── Step 4: 上游失败则透传错误状态，不扣信用 ──────────────
     if (!jinaRes.ok) {
         const errText = await jinaRes.text();
+        const headers = new Headers({ "Content-Type": "application/json" });
+
+        // 标记错误来源
+        headers.set("X-UniSkill-Error-Source", "Upstream-Provider");
+        headers.set("X-UniSkill-Upstream-Status", jinaRes.status.toString());
+
+        // 🛡️ 拦截上游 402，防止 LLM 端误报 UniSkill 余额不足
+        if (jinaRes.status === 402) {
+            return new Response(JSON.stringify({
+                success: false,
+                error: "Upstream Billing Error",
+                message: "Jina AI (Upstream Scraper) reported a billing error (402). This is NOT a UniSkill balance issue.",
+                _uniskill: buildUniskillMeta(0, credits, request)
+            }), {
+                status: 502,
+                headers
+            });
+        }
+
         return new Response(
             JSON.stringify({ success: false, error: `Jina upstream error: ${errText}` }),
-            { status: jinaRes.status, headers: { "Content-Type": "application/json" } }
+            { status: jinaRes.status, headers }
         );
     }
 
