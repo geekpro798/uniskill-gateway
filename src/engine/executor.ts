@@ -1,7 +1,7 @@
 // src/engine/executor.ts
 // Logic: The central execution engine for UniSkill
 
-import { SkillParser } from "./parser";
+// import { SkillParser } from "./parser"; // Unused after refactor
 import { PluginFormatter } from "../plugins/formatter";
 
 // Logic: Define Cloudflare environment variables
@@ -13,13 +13,11 @@ export interface Env {
     // ... 其他系统级环境变量
 }
 
-export async function executeSkill(skillMd: string, params: any, env: Env) {
+export async function executeSkill(impl: any, params: any, env: Env) {
     /**
-     * Logic: Parse the Markdown into a JSON spec
-     * 逻辑：将 Markdown 解析为 JSON 规格说明
+     * Logic: Use the provided implementation object directly
+     * 逻辑：直接使用传入的 implementation 配置对象（支持动态从 Web 获取）
      */
-    const spec = SkillParser.parse(skillMd);
-    const impl = spec.implementation;
 
     if (!impl.endpoint) {
         return JSON.stringify({ error: "Missing endpoint in skill implementation." });

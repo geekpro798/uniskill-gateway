@@ -21,6 +21,29 @@ export interface Env {
   VERCEL_WEBHOOK_URL: string;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
+  WEB_DOMAIN: string;
+  INTERNAL_API_SECRET: string;
+}
+
+/**
+ * Logic: Fetch skill configuration dynamically from the web service
+ * 逻辑：向 Web 服务端点发起请求获取底层 YAML 配置
+ */
+async function fetchSkillConfig(skillId: string, env: Env) {
+  const response = await fetch(`${env.WEB_DOMAIN}/api/internal/skill-config?id=${skillId}`, {
+    method: "GET",
+    headers: {
+      "x-internal-secret": env.INTERNAL_API_SECRET
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch config for skill: ${skillId}`);
+  }
+
+  const data = await response.json() as any;
+  // 逻辑：返回包含 endpoint, auth_header, plugin_hook 的 implementation 对象
+  return data.implementation;
 }
 
 
@@ -157,63 +180,77 @@ export default {
         return new Response("Missing skillName", { status: 400, headers: corsHeaders });
       }
 
-      const params = body.params || body; // Fallback: if no 'params' key, treat body as params
+      const params = body.params || body;
 
-      // ── Step 3: Resolve Skill with Intelligence ──
-      // 1. Try Private Vault
-      let skillRaw = await env.UNISKILL_KV.get(SkillKeys.private(keyHash, skillName));
+      try {
+        // ── Step 3: Resolve Skill Implementation (Dynamic or KV) ──
+        let implementation: any;
 
-      // 2. Try Official (as-is)
-      if (!skillRaw) {
-        skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(skillName));
-      }
+        // 🟢 关键步骤：执行前，先尝试从 Web 端拉取最新配置
+        try {
+          console.log(`[DEBUG] Attempting dynamic config fetch for: ${skillName}`);
+          implementation = await fetchSkillConfig(skillName, env);
+        } catch (e) {
+          console.warn(`[DEBUG] Dynamic config fetch failed, falling back to KV:`, e);
 
-      // 3. Try Official with 'uniskill_' prefix (Normalization for /v1/search etc)
-      if (!skillRaw && !skillName.startsWith("uniskill_")) {
-        const normalizedName = `uniskill_${skillName}`;
-        skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(normalizedName));
-        if (skillRaw) skillName = normalizedName; // Update skillName for billing
-      }
+          // Fallback: Resolve Skill from KV
+          let skillRaw = await env.UNISKILL_KV.get(SkillKeys.private(keyHash, skillName));
+          if (!skillRaw) {
+            skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(skillName));
+          }
+          if (!skillRaw && !skillName.startsWith("uniskill_")) {
+            const normalizedName = `uniskill_${skillName}`;
+            skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(normalizedName));
+            if (skillRaw) skillName = normalizedName;
+          }
 
-      if (!skillRaw) return new Response(`Skill [${skillName}] Not Found`, { status: 404, headers: corsHeaders });
+          if (!skillRaw) return new Response(`Skill [${skillName}] Not Found`, { status: 404, headers: corsHeaders });
 
-      // ── Step 4: Billing Check ──
-      let currentCredits = await getCredits(env.UNISKILL_KV, keyHash);
-      if (currentCredits === -1) currentCredits = 0; // Fallback for safety
-
-      let skillCost = 1;
-      if (skillName === "uniskill_search" || skillName === "uniskill_news" || skillName === "news") {
-        skillCost = 10;
-      } else if (skillName === "uniskill_scrape" || skillName === "scrape") {
-        skillCost = 20;
-      }
-
-      if (currentCredits < skillCost) {
-        return new Response(`Insufficient Credits. This skill costs ${skillCost}, but you have ${currentCredits}.`, { status: 402, headers: corsHeaders });
-      }
-
-      // ── Step 5: Execution ──
-      const executionResult = await executeSkill(skillRaw, params, env);
-
-      // ── Step 6: Post-Execution Billing ──
-      // 逻辑：使用统一计费工具，确保 KV 与 Supabase 同步更新
-      ctx.waitUntil(deductCredit(
-        env.UNISKILL_KV,
-        keyHash,
-        currentCredits,
-        skillCost,
-        env.VERCEL_WEBHOOK_URL,
-        env.ADMIN_KEY,
-        skillName
-      ));
-
-      return new Response(executionResult, {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
+          const spec = SkillParser.parse(skillRaw);
+          implementation = spec.implementation;
         }
-      });
+
+        // ── Step 4: Billing Check ──
+        let currentCredits = await getCredits(env.UNISKILL_KV, keyHash);
+        if (currentCredits === -1) currentCredits = 0;
+
+        let skillCost = 1;
+        if (skillName === "uniskill_search" || skillName === "uniskill_news" || skillName === "news") {
+          skillCost = 10;
+        } else if (skillName === "uniskill_scrape" || skillName === "scrape") {
+          skillCost = 20;
+        }
+
+        if (currentCredits < skillCost) {
+          return new Response(`Insufficient Credits. This skill costs ${skillCost}, but you have ${currentCredits}.`, { status: 402, headers: corsHeaders });
+        }
+
+        // ── Step 5: Execution ──
+        const executionResult = await executeSkill(implementation, params, env);
+
+        // ── Step 6: Post-Execution Billing ──
+        ctx.waitUntil(deductCredit(
+          env.UNISKILL_KV,
+          keyHash,
+          currentCredits,
+          skillCost,
+          env.VERCEL_WEBHOOK_URL,
+          env.ADMIN_KEY,
+          skillName
+        ));
+
+        return new Response(executionResult, {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+
+      } catch (error: any) {
+        console.error(`[Execution Flow Error]`, error);
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
     }
 
     // Fallback for undefined routes
