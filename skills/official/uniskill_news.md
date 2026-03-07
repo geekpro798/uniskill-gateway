@@ -47,3 +47,20 @@ payload:
 # 逻辑：触发数据清洗插件的钩子
 plugin_hook: "NEWS_AGGREGATOR_FORMATTER"
 ```
+## Returns
+```json
+{
+  "articles": [
+    {
+      "title": "Global Markets Rally on Tech Earnings",
+      "summary": "Major indices hit record highs today following stronger-than-expected earnings reports from leading technology companies. AI sector leads the growth.",
+      "source": "Reuters",
+      "url": "[https://www.reuters.com/markets/us/example](https://www.reuters.com/markets/us/example)",
+      "published_at": "2026-03-07T08:30:00Z"
+    }
+  ],
+  "metadata": {
+    "total_results": 1,
+    "query": "tech earnings"
+  }
+}
