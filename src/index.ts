@@ -7,7 +7,7 @@ import { SkillKeys } from "./utils/skill-keys";
 import { executeSkill } from "./engine/executor";
 import { handleProvision } from "./routes/admin";
 import { handleBasicConnector } from "./routes/basic-connector";
-import { errorResponse } from "./utils/response";
+import { errorResponse, corsHeaders, successResponse } from "./utils/response";
 import { getCredits, deductCredit } from "./utils/billing";
 import { SkillParser } from "./engine/parser";
 
@@ -23,12 +23,6 @@ export interface Env {
   SUPABASE_ANON_KEY: string;
 }
 
-// Logic: Centralized CORS headers
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -40,16 +34,53 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    // ── Routes Handle ──────────────────────────────────────────
+    const method = request.method;
+    const cleanPath = path.endsWith("/") ? path.slice(0, -1) : path;
+
+    // ── Route: List All Skills (FOR FRONTEND) ──
+    // 逻辑：兼容带/不带斜杠的路径
+    if (method === "GET" && cleanPath === "/v1/skills") {
+      console.log(`[DEBUG] GET Skills List`);
+
+      // 逻辑：列出所有以 'skill:' 开头的 KV 键（包括官方和私有）
+      // 注意：此简单实现假设官方技能都在 KV 中
+      const list = await env.UNISKILL_KV.list({ prefix: "skill:official:" });
+      const skills = [];
+
+      for (const key of list.keys) {
+        const raw = await env.UNISKILL_KV.get(key.name);
+        if (raw) {
+          try {
+            const spec = SkillParser.parse(raw);
+            skills.push({
+              id: key.name.replace("skill:official:", ""),
+              name: spec.name,
+              description: spec.description,
+              isOfficial: true
+            });
+          } catch (e) {
+            console.error(`Failed to parse skill ${key.name}:`, e);
+          }
+        }
+      }
+
+      return successResponse({ data: skills });
+    }
+
     // ── Route: Get Skill Detail API (FOR FRONTEND) ──
     // 逻辑：允许 frontend 通过 GET 读取并解析 KV 中的 Markdown 原文
     if (request.method === "GET" && path.startsWith("/v1/skills/")) {
       const skillName = path.split("/").pop();
+      console.log(`[DEBUG] GET Skill Detail: path=${path}, skillName=${skillName}`);
+
       if (!skillName) {
         return errorResponse("Missing skill name", 400);
       }
 
       // 逻辑：优先从官方库获取
       let skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(skillName));
+      console.log(`[DEBUG] Skill Raw Found: ${!!skillRaw}`);
       let isOfficial = true;
 
       if (!skillRaw) {

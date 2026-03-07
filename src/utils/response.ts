@@ -6,7 +6,13 @@
 // 网关版本号——升级时修改此处即可全局生效
 export const GATEWAY_VERSION = "v1.0.0";
 
-const JSON_HEADERS = { "Content-Type": "application/json" };
+// 逻辑：集中管理 CORS 响应头，确保前端 Fetch 不会被浏览器拦截
+const JSON_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Content-Type": "application/json"
+};
 
 /**
  * Builds a standardised JSON error response.
