@@ -44,8 +44,8 @@ async function syncToSupabase(
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                // ADMIN_KEY 用于鉴权，防止外部伪造请求
-                "Authorization": `Bearer ${adminKey}`,
+                // Logic: Vercel expects X-Admin-Secret for secure webhook sync
+                "X-Admin-Secret": adminKey,
             },
             // 新增 skillName 和 amount 字段，供 Webhook 写入 credit_events 表
             body: JSON.stringify({ hash: keyHash, newBalance, skillName, amount: -cost }),
