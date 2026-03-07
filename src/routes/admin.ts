@@ -10,58 +10,45 @@ import type { Env } from "../index.ts";
 // 默认签发的初始信用点数
 const DEFAULT_INITIAL_CREDITS = 50;
 
+// ── Step 1: 鉴权已在 index.ts 统一处理 ───────────────────
+import { SkillKeys } from "../utils/skill-keys.ts";
+
 /**
  * Handles POST /v1/admin/provision
  * Called by a trusted backend (e.g. Vercel) to create a new UniSkill API key.
- *
- * Security model:
- *   - X-Admin-Secret must match ADMIN_KEY (injected via Cloudflare Secret).
- *   - The raw key is returned ONCE to the caller and never stored.
- *   - Only the SHA-256 hash is persisted in KV as the lookup key.
  */
 export async function handleProvision(request: Request, env: Env): Promise<Response> {
+    // ... (鉴权已在入口 index.ts 完成)
 
-    // ── Step 1: 鉴权已在 index.ts 统一处理 ───────────────────
-    // 已通过 Authorization: Bearer {ADMIN_KEY} 验证
-
-    // ── Step 2: 解析可选的请求体参数 ─────────────────────────
+    // ── Step 2: 解析请求体 ───────────────────────────────
     let initialCredits = DEFAULT_INITIAL_CREDITS;
     let providedHash: string | undefined = undefined;
     let userTier = "FREE";
 
     try {
-        const body = await request.json() as Record<string, unknown>;
-        if (typeof body.credits === "number" && body.credits > 0) {
-            initialCredits = Math.floor(body.credits);
-        }
-        if (typeof body.hash === "string" && body.hash.length > 0) {
-            providedHash = body.hash;
-        }
-        if (typeof body.tier === "string" && body.tier.length > 0) {
-            userTier = body.tier.toUpperCase();
-        }
-    } catch {
-        // 无 body 或解析失败均使用默认值
-    }
+        const body = await request.json() as any;
+        if (body.credits) initialCredits = Number(body.credits);
+        if (body.hash) providedHash = body.hash;
+        if (body.tier) userTier = body.tier.toUpperCase();
+    } catch { /* ignore */ }
 
-    // ── Step 3 & 4: 确定要写入的 Hash ────────────────────────
+    // ── Step 3: 确定 Hash ───────────────────────────────
     let rawKey: string | undefined = undefined;
     let keyHash: string;
 
     if (providedHash) {
-        // 核心目标：如果主站传来了 hash，必须使用并只写入这个 hash
         keyHash = providedHash;
     } else {
-        // 向后兼容逻辑：如果没有传 hash，则本地生成一个全新的并做哈希
         rawKey = `us-${crypto.randomUUID()}`;
         keyHash = await hashKey(rawKey);
     }
 
-    // ── Step 5: 将哈希值作为 Key 写入 KV，存储信用额度 ────────
-    await env.UNISKILL_KV.put(keyHash, String(initialCredits));
+    // ── Step 4: 写入 KV（使用平台化标准 Key）───────────────
+    // 逻辑：写入积分，Key 必须符合 user:credits:{hash} 格式
+    await env.UNISKILL_KV.put(SkillKeys.credits(keyHash), String(initialCredits));
 
-    // ── Step 5.5: 存储用户档位信息 ───────────────────────────
-    await env.UNISKILL_KV.put(`tier:${keyHash}`, userTier);
+    // 逻辑：写入档位，Key 符合 tier:{hash} 格式
+    await env.UNISKILL_KV.put(SkillKeys.tier(keyHash), userTier);
 
     // ── Step 6: 返回原始 Key（仅此一次）和元数据 ────────────
     return new Response(

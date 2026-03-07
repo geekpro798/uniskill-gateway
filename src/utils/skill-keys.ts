@@ -24,6 +24,12 @@ export const SkillKeys = {
     credits: (keyHash: string) => `user:credits:${keyHash}`,
 
     /**
+     * Logic: User tier information indexed by key_hash
+     * 逻辑：用户档位信息，以 key_hash 索引
+     */
+    tier: (keyHash: string) => `tier:${keyHash}`,
+
+    /**
      * Logic: Helper to identify the storage type from a raw KV key
      * 逻辑：辅助函数，从原始 KV Key 中识别存储类型
      */
