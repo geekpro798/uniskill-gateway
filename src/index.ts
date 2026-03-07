@@ -8,6 +8,7 @@ import { executeSkill } from "./engine/executor";
 import { handleProvision } from "./routes/admin";
 import { handleBasicConnector } from "./routes/basic-connector";
 import { errorResponse } from "./utils/response";
+import { getCredits, deductCredit } from "./utils/billing";
 
 // ── 环境变量类型声明 ──────────────────────────────────────────
 export interface Env {
@@ -115,9 +116,8 @@ export default {
       if (!skillRaw) return new Response(`Skill [${skillName}] Not Found`, { status: 404, headers: corsHeaders });
 
       // ── Step 4: Billing Check ──
-      const creditKey = SkillKeys.credits(keyHash);
-      let currentCreditsStr = await env.UNISKILL_KV.get(creditKey);
-      let currentCredits = currentCreditsStr ? parseInt(currentCreditsStr, 10) : 0;
+      let currentCredits = await getCredits(env.UNISKILL_KV, keyHash);
+      if (currentCredits === -1) currentCredits = 0; // Fallback for safety
 
       let skillCost = 1;
       if (skillName === "uniskill_search" || skillName === "uniskill_news" || skillName === "news") {
@@ -134,7 +134,16 @@ export default {
       const executionResult = await executeSkill(skillRaw, params, env);
 
       // ── Step 6: Post-Execution Billing ──
-      await env.UNISKILL_KV.put(creditKey, (currentCredits - skillCost).toString());
+      // 逻辑：使用统一计费工具，确保 KV 与 Supabase 同步更新
+      ctx.waitUntil(deductCredit(
+        env.UNISKILL_KV,
+        keyHash,
+        currentCredits,
+        skillCost,
+        env.VERCEL_WEBHOOK_URL,
+        env.ADMIN_KEY,
+        skillName
+      ));
 
       return new Response(executionResult, {
         status: 200,
