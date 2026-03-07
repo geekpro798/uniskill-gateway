@@ -58,8 +58,14 @@ export default {
       return handleBasicConnector(request, env, rawKey, ctx);
     }
 
-    // ── Route: Default Skill Execution (Root POST) ──
-    if (path === "/" && request.method === "POST") {
+    // ── Route: Skill Execution (Root POST or /v1/:skillName) ──
+    const isRootPost = path === "/" && request.method === "POST";
+    const isV1SkillPath = path.startsWith("/v1/") &&
+      path !== "/v1/admin/provision" &&
+      path !== "/v1/basic-connector" &&
+      request.method === "POST";
+
+    if (isRootPost || isV1SkillPath) {
       // ── Step 1: Extract 'key' from Header ──
       const authHeader = request.headers.get("Authorization") || "";
       const rawKey = authHeader.replace("Bearer ", "").trim();
@@ -71,25 +77,42 @@ export default {
       const keyHash = await hashKey(rawKey);
 
       // ── Step 2: Payload Parsing ──
-      let body: any;
+      let body: any = {};
       try {
         body = await request.json();
       } catch {
-        return new Response("Invalid JSON Body", { status: 400, headers: corsHeaders });
+        // Allowed to be empty if skillName is in path
       }
 
-      const { skillName, params } = body;
+      // Logic: Resolve skillName from path or body
+      let skillName = body.skillName;
+      if (isV1SkillPath) {
+        skillName = path.split("/")[2] || skillName;
+      }
+
       if (!skillName) {
-        return new Response("Missing skillName in request body", { status: 400, headers: corsHeaders });
+        return new Response("Missing skillName", { status: 400, headers: corsHeaders });
       }
 
-      // ── Step 3: Resolve Skill ──
+      const params = body.params || body; // Fallback: if no 'params' key, treat body as params
+
+      // ── Step 3: Resolve Skill with Intelligence ──
+      // 1. Try Private Vault
       let skillRaw = await env.UNISKILL_KV.get(SkillKeys.private(keyHash, skillName));
+
+      // 2. Try Official (as-is)
       if (!skillRaw) {
         skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(skillName));
       }
 
-      if (!skillRaw) return new Response("Skill Not Found", { status: 404, headers: corsHeaders });
+      // 3. Try Official with 'uniskill_' prefix (Normalization for /v1/search etc)
+      if (!skillRaw && !skillName.startsWith("uniskill_")) {
+        const normalizedName = `uniskill_${skillName}`;
+        skillRaw = await env.UNISKILL_KV.get(SkillKeys.official(normalizedName));
+        if (skillRaw) skillName = normalizedName; // Update skillName for billing
+      }
+
+      if (!skillRaw) return new Response(`Skill [${skillName}] Not Found`, { status: 404, headers: corsHeaders });
 
       // ── Step 4: Billing Check ──
       const creditKey = SkillKeys.credits(keyHash);
@@ -108,7 +131,7 @@ export default {
       }
 
       // ── Step 5: Execution ──
-      const executionResult = await executeSkill(skillRaw, params || {}, env);
+      const executionResult = await executeSkill(skillRaw, params, env);
 
       // ── Step 6: Post-Execution Billing ──
       await env.UNISKILL_KV.put(creditKey, (currentCredits - skillCost).toString());
