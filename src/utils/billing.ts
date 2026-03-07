@@ -32,7 +32,8 @@ async function syncToSupabase(
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "X-Admin-Secret": adminKey,
+                // Logic: UniSkill Web expects Authorization: Bearer <ADMIN_KEY>
+                "Authorization": `Bearer ${adminKey}`,
             },
             body: JSON.stringify({ hash: keyHash, newBalance, skillName, amount: -cost }),
         });
