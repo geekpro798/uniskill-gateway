@@ -66,7 +66,15 @@ export const SkillParser = {
         // ── Step 5: Extract Returns (JSON block under ## Returns) ──
         // 逻辑：利用正则提取 Markdown 中的 ## Returns 区块
         const returnsMatch = markdown.match(/## Returns\s+```json\s+([\s\S]*?)\s+```/);
-        const returnsExample = returnsMatch ? JSON.parse(returnsMatch[1]) : {};
+
+        let parsedReturns = null;
+        if (returnsMatch && returnsMatch[1]) {
+            try {
+                parsedReturns = JSON.parse(returnsMatch[1]);
+            } catch (error) {
+                console.warn("Failed to parse returns JSON", error);
+            }
+        }
 
         // Logic: Return the standardized executable specification
         // 逻辑：返回标准化后的可执行规格说明
@@ -74,7 +82,7 @@ export const SkillParser = {
             name,
             description,
             parameters,
-            returns: returnsExample,
+            returns: parsedReturns,
             implementation
         };
     }
