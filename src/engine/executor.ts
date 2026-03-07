@@ -2,7 +2,8 @@
 // Logic: The central execution engine for UniSkill
 
 // import { SkillParser } from "./parser"; // Unused after refactor
-import { PluginFormatter } from "../plugins/formatter";
+// import { PluginFormatter } from "../plugins/formatter";
+import { PluginRegistryManager } from "../formatters/index";
 
 // Logic: Define Cloudflare environment variables
 // 逻辑：定义 Cloudflare 的环境变量接口
@@ -63,7 +64,7 @@ export async function executeSkill(impl: any, params: any, env: Env) {
         // ── Step 3: Post-Processing Hook (The Magic) ──
         // 逻辑：如果 YAML 中定义了清洗钩子，则将原始数据交给对应的插件处理
         if (impl.plugin_hook) {
-            return await PluginFormatter.format(impl.plugin_hook, rawData);
+            return await PluginRegistryManager.format(impl.plugin_hook, rawData);
         }
 
         // 逻辑：如果没有定义钩子（如普通的 proxy 技能），直接返回字符串化的结果
