@@ -271,10 +271,10 @@ export class MCPSession {
 
             let allTools = Array.from(publicToolMap.values());
 
+            const userUid = this.storedUserUid;
+
             // 3. 隔离处理私有工具 (Isolate private tools fetching)
             try {
-                const userUid = this.storedUserUid;
-                
                 if (userUid && userUid !== "public" && userUid.trim().length > 0) {
                     const username = await getUsername(this.env.UNISKILL_KV, userUid, this.env);
                     const list = await this.env.UNISKILL_KV.list({ prefix: `skill:private:${userUid}:` });
@@ -330,6 +330,42 @@ export class MCPSession {
                 }
             } catch (authErr) {
                 console.error("[DO] Private tools fetch error:", authErr);
+            }
+
+            // 4. 加载团队技能 (Fetch team-scoped skills)
+            try {
+                const { getProfile } = await import("../utils/billing");
+                const profile = await getProfile(this.env.UNISKILL_KV, userUid, this.env);
+                const teams: string[] = profile.teams || [];
+
+                for (const teamUid of teams) {
+                    const teamList = await this.env.UNISKILL_KV.list({ prefix: `skill:team:${teamUid}:` });
+                    const teamFetchPromises = teamList.keys.map(async (key: any) => {
+                        const raw = await this.env.UNISKILL_KV.get(key.name);
+                        if (!raw) return null;
+                        try {
+                            const toolRaw = JSON.parse(raw);
+                            const baseName = toolRaw.id || key.name.split(':').pop();
+                            const mcpName = `team_${baseName}`.slice(0, 64);
+                            return {
+                                name: mcpName,
+                                description: toolRaw.meta?.description || toolRaw.description || "Team tool",
+                                inputSchema: toolRaw.config?.parameters || toolRaw.meta?.parameters || { type: "object", properties: {} }
+                            };
+                        } catch {
+                            return null;
+                        }
+                    });
+                    const teamTools = (await Promise.all(teamFetchPromises)).filter(Boolean);
+                    for (const tt of teamTools) {
+                        const ttName = (tt as any).name;
+                        if (!allTools.find(t => t.name === ttName)) {
+                            allTools.push(tt);
+                        }
+                    }
+                }
+            } catch (teamErr) {
+                console.error("[DO] Team tools fetch error:", teamErr);
             }
 
             // 最终赋值 (Final assignment)

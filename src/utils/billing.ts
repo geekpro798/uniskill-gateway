@@ -28,6 +28,7 @@ export interface UserProfile {
     credits: number;
     tier: string;
     username: string;
+    teams: string[];
     updated_at: number;
 }
 
@@ -71,6 +72,7 @@ export async function getProfile(kv: KVNamespace, uid: string, env: any): Promis
             credits: oldCredits ? parseFloat(oldCredits) : 0,
             tier: oldTier || "FREE",
             username: migratedUsername,
+            teams: [],
             updated_at: Date.now()
         };
         console.log(`[Migration] Migrated legacy data to profile for ${uid}, username=${migratedUsername}`);
@@ -82,6 +84,7 @@ export async function getProfile(kv: KVNamespace, uid: string, env: any): Promis
             credits: userData.credits || 0,
             tier: userData.tier || "FREE",
             username: userData.username || "user",
+            teams: [],
             updated_at: Date.now()
         };
     }
@@ -99,13 +102,6 @@ export async function getProfile(kv: KVNamespace, uid: string, env: any): Promis
 export async function getCredits(kv: KVNamespace, uid: string, env: any): Promise<number> {
     const profile = await getProfile(kv, uid, env);
     return profile.credits;
-}
-
-
-        }
-    }
-
-    return uid;
 }
 
 /**

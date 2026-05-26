@@ -95,12 +95,27 @@ export async function handleSyncCache(request: Request, env: Env): Promise<Respo
                     const privateKey = SkillKeys.private(userUid, skill_name);
                     await env.UNISKILL_KV.put(privateKey, JSON.stringify(manifest));
                     console.log(`[Admin] Synced private skill to KV via sync_cache: ${privateKey}`);
-                    
+
                     // 🌟 密钥同步：存储加密后的技能专属密钥
                     if (secrets && typeof secrets === 'object') {
                         const secretsKey = SkillKeys.skillSecrets(userUid, skill_name);
                         await env.UNISKILL_KV.put(secretsKey, JSON.stringify(secrets));
                         console.log(`[Admin] Synced skill-scoped secrets for ${skill_name}`);
+                    }
+                } else if (lowerStatus === 'team') {
+                    const teamUid = body.team_uid;
+                    if (teamUid) {
+                        const teamKey = SkillKeys.team(teamUid, skill_name);
+                        await env.UNISKILL_KV.put(teamKey, JSON.stringify(manifest));
+                        console.log(`[Admin] Synced team skill to KV via sync_cache: ${teamKey}`);
+
+                        if (secrets && typeof secrets === 'object') {
+                            const secretsKey = SkillKeys.skillSecrets(userUid, skill_name);
+                            await env.UNISKILL_KV.put(secretsKey, JSON.stringify(secrets));
+                            console.log(`[Admin] Synced skill-scoped secrets for ${skill_name}`);
+                        }
+                    } else {
+                        console.warn(`[Admin] Team skill sync skipped for ${skill_name}: missing team_uid`);
                     }
                 } else if (lowerStatus === 'public' || lowerStatus === 'community' || lowerStatus === 'official') {
                     const marketKey = SkillKeys.market(skill_name);
@@ -110,13 +125,18 @@ export async function handleSyncCache(request: Request, env: Env): Promise<Respo
             }
         }
 
-        // 🌟 核心逻辑扩展：如果 type 是 secrets_sync，则执行用户私有密匙同步
-        if (type === 'secrets_sync') {
-            const { secrets } = body;
-            if (userUid && secrets && typeof secrets === 'object') {
-                const secretsKey = SkillKeys.secrets(userUid);
-                await env.UNISKILL_KV.put(secretsKey, JSON.stringify(secrets));
-                console.log(`[Admin] Synced user secrets to KV via sync_cache: ${secretsKey}`);
+        // 🌟 核心逻辑扩展：如果 type 是 teams_sync，则执行用户的团队列表同步
+        if (type === 'teams_sync') {
+            const { teams } = body;
+            if (userUid && Array.isArray(teams)) {
+                // 读取现有 profile，更新 teams 字段
+                const { getProfile } = await import("../utils/billing");
+                const profile = await getProfile(env.UNISKILL_KV, userUid, env);
+                profile.teams = teams;
+                profile.updated_at = Date.now();
+                await env.UNISKILL_KV.put(SkillKeys.profile(userUid), JSON.stringify(profile));
+                setCache(`profile:${userUid}`, profile);
+                console.log(`[Admin] Synced teams for ${userUid}: [${teams.join(', ')}]`);
             }
         }
     } catch { /* ignore */ }
@@ -138,6 +158,7 @@ export async function handleSyncCache(request: Request, env: Env): Promise<Respo
         credits: Number(totalCredits ?? 0),
         tier: (newTier || "FREE").toUpperCase(),
         username: username || "user",
+        teams: [],
         updated_at: Date.now()
     };
     
@@ -208,8 +229,9 @@ export async function handleTopup(request: Request, env: Env): Promise<Response>
     // 2. Overwrite User Profile
     const profile: UserProfile = {
         credits: newBalance,
-        tier: newTier || "FREE", // Fallback to FREE if not provided, though top-up usually keeps tier
+        tier: newTier || "FREE",
         username: "user",
+        teams: [],
         updated_at: Date.now()
     };
     
@@ -262,6 +284,17 @@ export async function handleSyncSkill(request: Request, env: Env): Promise<Respo
             const privateKey = SkillKeys.private(user_uid, skill_name);
             await env.UNISKILL_KV.put(privateKey, JSON.stringify(manifest));
             console.log(`[Admin] Synced private skill to KV: ${privateKey}`);
+        } else if (lowerStatus === 'team') {
+            const teamUid = body.team_uid;
+            if (!teamUid) {
+                return new Response(
+                    JSON.stringify({ success: false, error: "Missing team_uid for team skill" }),
+                    { status: 400, headers: { "Content-Type": "application/json" } }
+                );
+            }
+            const teamKey = SkillKeys.team(teamUid, skill_name);
+            await env.UNISKILL_KV.put(teamKey, JSON.stringify(manifest));
+            console.log(`[Admin] Synced team skill to KV: ${teamKey}`);
         } else if (lowerStatus === 'public' || lowerStatus === 'community' || lowerStatus === 'official') {
             const marketKey = SkillKeys.market(skill_name);
             await env.UNISKILL_KV.put(marketKey, JSON.stringify(manifest));

@@ -80,6 +80,23 @@ export async function handleExecuteSkill(request: Request, env: Env, ctx: Execut
     const rlResult = await checkRateLimit(payer_id, profile.tier, env);
     if (!rlResult.isAllowed) return errorResponse(`Rate limit exceeded`, 429);
 
+    // 4.5. 团队授权检查 (X-USK-Org header)
+    const teamUid = request.headers.get("X-USK-Org");
+    if (teamUid) {
+      const isMember = await checkTeamMembership(env, payer_id, teamUid, profile);
+      if (!isMember) return errorResponse("Forbidden: not a member of this team", 403);
+
+      // 团队余额检查：确保团队有足够 credits 才允许执行
+      const teamCredits = await getTeamCredits(env, teamUid);
+      const cost = manifest.cost.base_fee_cents;
+      if (teamCredits < cost) {
+        return errorResponse(
+          `Insufficient team credits: need ${cost}, have ${teamCredits}`,
+          402
+        );
+      }
+    }
+
     // 5. 根据 Implementation 类型进行分发
     let executionResult: CliExecutionResult;
     const implementation = manifest.implementation;
@@ -123,7 +140,7 @@ export async function handleExecuteSkill(request: Request, env: Env, ctx: Execut
 
     // 6. 记账与扣费 (直连 Supabase RPC，同步执行以确保 Durable Object 上下文中也能可靠触发)
     // 注意：ctx.waitUntil 在 Durable Object 内部可能不可靠，因此改为 await 直接调用
-    await enqueueBillingEvent(env, manifest, payer_id, executionResult);
+    await enqueueBillingEvent(env, manifest, payer_id, executionResult, teamUid);
 
     // 7. 返回增强型标准化响应
     const statusCode = executionResult.status === 'SUCCESS' ? 200 : 500;
@@ -175,7 +192,7 @@ async function fetchSecretsFromVault(env: Env, payerId: string, skillName: strin
 // 辅助函数：直连 Supabase 计费 (不依赖消息队列)
 // ============================================================
 
-async function enqueueBillingEvent(env: Env, manifest: SkillManifest, payerId: string, result: CliExecutionResult) {
+async function enqueueBillingEvent(env: Env, manifest: SkillManifest, payerId: string, result: CliExecutionResult, teamUid?: string) {
   const durationMs = result.duration_ms || 0;
   const costCredits = manifest.cost.base_fee_cents;
 
@@ -187,9 +204,10 @@ async function enqueueBillingEvent(env: Env, manifest: SkillManifest, payerId: s
     return;
   }
 
-  // 直接使用 fetch 调用 Supabase RPC，绕过 JS 客户端库，
-  // 并且不传 p_source_skill_uid，避免两个同名 RPC 重载产生 PGRST203 歧义错误
-  const rpcPayload = {
+  // 团队扣费 vs 个人扣费 — 调用不同的 RPC
+  const rpcName = teamUid ? 'record_team_skill_usage' : 'record_skill_usage';
+
+  const rpcPayload: Record<string, any> = {
     p_user_uid:         payerId,
     p_skill_name:       manifest.skill_name,
     p_payment_type:     'credits',
@@ -203,8 +221,12 @@ async function enqueueBillingEvent(env: Env, manifest: SkillManifest, payerId: s
     p_display_name:     manifest.display_name,
   };
 
+  if (teamUid) {
+    rpcPayload.p_team_uid = teamUid;
+  }
+
   try {
-    const resp = await fetch(`${supabaseUrl}/rest/v1/rpc/record_skill_usage`, {
+    const resp = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -218,7 +240,12 @@ async function enqueueBillingEvent(env: Env, manifest: SkillManifest, payerId: s
       const errText = await resp.text();
       console.error(`[execute-skill] Billing RPC HTTP ${resp.status}: ${errText}`);
     } else {
-      console.log(`[execute-skill] Billing recorded: skill=${manifest.skill_name} user=...${payerId.slice(-6)} cost=${costCredits}`);
+      const rpcResult = await resp.json() as any;
+      if (rpcResult && !rpcResult.success) {
+        console.error(`[execute-skill] Billing RPC failed: ${rpcResult.error}`);
+      } else {
+        console.log(`[execute-skill] Billing recorded: skill=${manifest.skill_name} user=...${payerId.slice(-6)} cost=${costCredits} team=${teamUid || 'personal'}`);
+      }
     }
   } catch (err) {
     console.error(`[execute-skill] Billing fetch failed:`, err);
@@ -231,7 +258,7 @@ async function enqueueBillingEvent(env: Env, manifest: SkillManifest, payerId: s
 
 async function loadSkillManifest(env: Env, skillName: string, payerId: string): Promise<SkillManifest | null> {
   const kv = env.SKILLS_KV || env.UNISKILL_KV;
-  
+
   // 查找顺序：私人 (uid:name) -> 官方 (official:name) -> 市场 (market:name)
   let raw: string | null = null;
   const searchPaths = [
@@ -265,5 +292,122 @@ async function loadSkillManifest(env: Env, skillName: string, payerId: string): 
     };
   } catch {
     return null;
+  }
+}
+
+// ============================================================
+// 辅助函数：团队授权检查 (X-USK-Org)
+// ============================================================
+
+async function checkTeamMembership(
+  env: Env,
+  userUid: string,
+  teamUid: string,
+  profile?: { teams?: string[] }
+): Promise<boolean> {
+  // 1. 先从 KV profile 缓存中的 teams 列表检查
+  if (profile?.teams && profile.teams.includes(teamUid)) {
+    return true;
+  }
+
+  // 2. 回退：查询 Supabase team_members 表
+  const supabaseUrl = (env as any).SUPABASE_URL;
+  const supabaseKey = (env as any).SUPABASE_SERVICE_ROLE_KEY || (env as any).SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[TeamAuth] Missing Supabase credentials for team check');
+    return false;
+  }
+
+  try {
+    // 先查 team_members
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/team_members?select=role&team_uid=eq.${encodeURIComponent(teamUid)}&user_uid=eq.${encodeURIComponent(userUid)}&limit=1`,
+      {
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+      }
+    );
+
+    if (resp.ok) {
+      const data = await resp.json() as any[];
+      if (data && data.length > 0) {
+        // 自愈：更新 KV profile 的 teams 列表
+        if (profile) {
+          const updatedTeams = [...(profile.teams || []), teamUid];
+          const updatedProfile = { ...profile, teams: updatedTeams, updated_at: Date.now() };
+          await env.UNISKILL_KV.put(SkillKeys.profile(userUid), JSON.stringify(updatedProfile));
+        }
+        return true;
+      }
+    }
+
+    // 再查 teams.admin_uid（owner 身份）
+    const ownerResp = await fetch(
+      `${supabaseUrl}/rest/v1/teams?select=team_uid&team_uid=eq.${encodeURIComponent(teamUid)}&admin_uid=eq.${encodeURIComponent(userUid)}&limit=1`,
+      {
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+      }
+    );
+
+    if (ownerResp.ok) {
+      const ownerData = await ownerResp.json() as any[];
+      if (ownerData && ownerData.length > 0) {
+        // 自愈：更新 KV profile 的 teams 列表
+        if (profile) {
+          const updatedTeams = [...(profile.teams || []), teamUid];
+          const updatedProfile = { ...profile, teams: updatedTeams, updated_at: Date.now() };
+          await env.UNISKILL_KV.put(SkillKeys.profile(userUid), JSON.stringify(updatedProfile));
+        }
+        return true;
+      }
+    }
+
+    return false;
+  } catch (err) {
+    console.error('[TeamAuth] Supabase team check failed:', err);
+    return false;
+  }
+}
+
+// ============================================================
+// 辅助函数：查询团队 credits 余额
+// ============================================================
+
+async function getTeamCredits(env: Env, teamUid: string): Promise<number> {
+  const supabaseUrl = (env as any).SUPABASE_URL;
+  const supabaseKey = (env as any).SUPABASE_SERVICE_ROLE_KEY || (env as any).SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[TeamCredits] Missing Supabase credentials');
+    return 0;
+  }
+
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/teams?select=credits&team_uid=eq.${encodeURIComponent(teamUid)}&limit=1`,
+      {
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+      }
+    );
+
+    if (!resp.ok) {
+      console.error(`[TeamCredits] HTTP ${resp.status}: ${await resp.text()}`);
+      return 0;
+    }
+
+    const data = await resp.json() as { credits: number }[];
+    return data?.[0]?.credits ?? 0;
+  } catch (err) {
+    console.error('[TeamCredits] Fetch failed:', err);
+    return 0;
   }
 }

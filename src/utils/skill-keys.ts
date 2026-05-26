@@ -14,6 +14,12 @@ export const SkillKeys = {
     private: (uid: string, name: string) => `skill:private:${uid}:${name}`,
 
     /**
+     * Logic: Team skills indexed by team_uid with team-scoped visibility
+     * 逻辑：团队技能通过 team_uid 索引，团队内可见
+     */
+    team: (teamUid: string, name: string) => `skill:team:${teamUid}:${name}`,
+
+    /**
      * Logic: Marketplace skills are public but carry author attribution
      * 逻辑：市场技能公开可见，但带有作者归属标签
      */
@@ -58,9 +64,10 @@ export const SkillKeys = {
      * Logic: Helper to identify the storage type from a raw KV key
      * 逻辑：辅助函数，从原始 KV Key 中识别存储类型
      */
-    getCategory: (key: string): 'official' | 'private' | 'market' | 'unknown' => {
+    getCategory: (key: string): 'official' | 'private' | 'team' | 'market' | 'unknown' => {
         if (key.startsWith('skill:official:')) return 'official';
         if (key.startsWith('skill:private:')) return 'private';
+        if (key.startsWith('skill:team:')) return 'team';
         if (key.startsWith('skill:market:')) return 'market';
         return 'unknown';
     }
