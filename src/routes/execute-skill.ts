@@ -101,7 +101,31 @@ export async function handleExecuteSkill(request: Request, env: Env, ctx: Execut
     let executionResult: CliExecutionResult;
     const implementation = manifest.implementation;
 
-    if (implementation && implementation.type === 'cli') {
+    if (implementation && implementation.type === 'native' && implementation.handler === 'uniskill_notify') {
+      try {
+        const { handleNotify } = await import("./notify");
+        const syntheticReq = new Request("https://internal/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: params.title, body: params.body || params.message })
+        });
+        (syntheticReq as any)._uniskill_user_uid = payer_id;
+        const nativeResponse = await handleNotify(syntheticReq, env);
+        const nativeData = await nativeResponse.json() as any;
+        executionResult = {
+          status: nativeData.success ? 'SUCCESS' : 'FAILED',
+          result: nativeData,
+          duration_ms: Date.now() - startTime
+        };
+      } catch (err: any) {
+        executionResult = {
+          status: 'FAILED',
+          message: err.message,
+          result: { error: String(err) },
+          duration_ms: Date.now() - startTime
+        };
+      }
+    } else if (implementation && implementation.type === 'cli') {
       // 🚀 分支 A: CLI 运行时
       // 从 Vault 获取该用户授权的机密信息 (基于系统逻辑，通过 payer_id 隔离)
       const secrets = await fetchSecretsFromVault(env, payer_id, skillName);

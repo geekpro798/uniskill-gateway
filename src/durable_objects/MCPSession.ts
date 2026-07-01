@@ -111,6 +111,18 @@ const FALLBACK_TOOLS = [
             },
             required: ["chartType", "labels", "datasets"]
         }
+    },
+    {
+        name: "uniskill_notify",
+        description: "Send a native OS notification to the user's desktop (macOS or Windows). Use this to alert the user or deliver reminders.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                title: { type: "string", description: "Notification title" },
+                body: { type: "string", description: "Notification body text" }
+            },
+            required: ["title", "body"]
+        }
     }
 ];
 

@@ -358,6 +358,12 @@ export default {
         return handleExecuteSkill(request, env, ctx);
       }
 
+      // 路由：通知轮询（本地 daemon 拉取待推送的通知）
+      if (cleanPath === "/v1/notify/poll" && method === "GET") {
+        const { handleNotifyPoll } = await import("./routes/notify");
+        return handleNotifyPoll(request, env);
+      }
+
       // 逻辑：V1 组内未匹配的路径
       return new Response(JSON.stringify({ error: "Endpoint not found in v1 API." }), {
         status: 404,

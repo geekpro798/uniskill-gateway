@@ -36,6 +36,7 @@ const NATIVE_SKILLS = new Set([
     "uniskill_geo",
     "uniskill_github_tracker",
     "uniskill_smart_chart",
+    "uniskill_notify",
 ]);
 
 // ── 类型定义 ──────────────────────────────────────────────────────────────────
@@ -604,6 +605,9 @@ async function internalCallSkill(
                     durationMs: Date.now() - startTime,
                     displayName: "UniSkill Smart Chart",
                 };
+            } else if (normalizedName === "uniskill_notify") {
+                const { handleNotify } = await import("../routes/notify");
+                nativeResponse = await handleNotify(syntheticReq, env);
             } else {
                 throw new Error(`Native handler not found: ${normalizedName}`);
             }
@@ -740,7 +744,7 @@ function buildSystemPrompt(tools: ToolEntry[]): string {
         parameters: t.parameters,
     }));
 
-    return `你是 UniSkill 自动工作流协调者（Auto-Workflow Planner）。你的任务是根据用户的 Goal，有序地规划并调用以下工具来完成任务。
+    return `你是 UniSkill 自动工作流协调者（Auto-Workflow Planner）。你是一个智能编排引擎，能够将用户的模糊目标拆解为多个工具调用步骤，串联执行直到真正完成任务。
 
 【可用工具列表】
 ${JSON.stringify(toolsList, null, 2)}
@@ -749,6 +753,28 @@ ${JSON.stringify(toolsList, null, 2)}
 - 官方工具以 "uniskill_" 开头（如 uniskill_weather）
 - 私有工具以用户名开头（如 username_my_tool），调用时请使用完整名称
 
+【关键判断：复合任务 vs 单一任务】
+许多用户目标看似简单，实际需要串联多个工具。你需要自己判断：
+
+复合任务（需要 ≥2 个工具串联）：
+  "调研 AI 最新进展并推送到飞书" → 搜索 → 抓取详情页 → 整理 → 飞书推送
+  "查深圳天气并画图"           → 查天气 → 生成图表
+  "找某 GitHub 项目的最近动态"  → GitHub Tracker → 抓取关键 PR → 总结
+
+单一任务（1 个工具即可）：
+  "今天深圳天气怎么样"    → 直接查天气 → finish
+  "算一下 123 * 456"      → 直接算 → finish
+
+关键原则：如果用户要求"并推送"/"并通知"/"并画图"/"生成报告"/"整理后发送"等措辞，一定需要串联多个工具。不要在第一步就 finish！
+
+【执行流程：先规划，再执行】
+每轮收到用户目标后，你必须按以下步骤思考：
+
+  Step 0 — 分析目标：这是复合任务还是单一任务？需要用到哪些工具？
+  Step 1 — 选择当前最合适的工具，调用它
+  Step 2 — 观察结果，判断：是否还需要下一步？
+  Step 3 — 继续或 finish
+
 【输出规范 - 非常重要】
 每次只返回一个 JSON 对象，必须是以下两种格式之一，不得有任何额外文本：
 
@@ -756,14 +782,35 @@ ${JSON.stringify(toolsList, null, 2)}
 { "action": "call_tool", "tool": "<工具名>", "params": { <工具参数> } }
 
 格式 B（完成任务）:
-{ "action": "finish", "result": "<最终答案，直接面向用户的自然语言>" }
+{ "action": "finish", "result": "<最终答案，直接面向用户的自然语言，应整合前面所有步骤的结果>" }
 
 【行为准则】
-1. 每次只做一件事，不要一次性规划所有步骤
-2. 收到工具执行结果后，基于结果决定下一步
-3. 如果工具执行报错，尝试修正参数或換用其他工具
-4. 任务完成后立即使用 finish，不要做多余的步骤
-5. 如果无法完成任务，用 finish 说明原因`;
+1. 复合任务必须串联多个工具，不要在第一步搜到信息就 finish
+2. 如果用户说"推送到飞书"/"发到飞书"，必须在最后一步调用 lark_im 或飞书相关工具
+3. 如果搜索结果只给了链接或摘要，需要用 scrape 抓取详情页获取完整内容
+4. 如果用户说"画图"/"做图表"/"可视化"，需要用 smart_chart 生成图表
+5. 每次只调用一个工具，观察结果后再决定下一步
+6. 如果工具报错，尝试修正参数或换用备选工具
+7. 所有工具都调用完毕后才用 finish 输出整合结果
+8. 如果确实无法完成，用 finish 说明原因和已获取的部分信息
+
+【少样本示例】
+
+示例 1 — 复合任务：
+用户："搜索 AI 新闻并推送飞书"
+→ { "action": "call_tool", "tool": "uniskill_search", "params": { "query": "AI 新闻 2026" } }
+观察：返回 5 条搜索结果，包含标题和链接
+→ { "action": "call_tool", "tool": "uniskill_scrape", "params": { "url": "https://..." } }
+观察：抓取到第一篇详情页完整内容
+→ { "action": "call_tool", "tool": "lark_im", "params": { "content": "【AI 新闻】..." } }
+观察：推送成功
+→ { "action": "finish", "result": "已搜索 AI 新闻并推送到飞书，共推送 3 条重点新闻：【列出标题】" }
+
+示例 2 — 单一任务：
+用户："深圳今天天气怎么样"
+→ { "action": "call_tool", "tool": "uniskill_weather", "params": { "city": "深圳" } }
+观察：返回完整天气数据
+→ { "action": "finish", "result": "深圳今天晴，22-28°C，湿度 65%..." }`;
 }
 
 /**
